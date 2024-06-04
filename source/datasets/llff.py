@@ -186,6 +186,8 @@ class LLFFPerScene(base.Dataset):
             intr=intr,  # numpy array (3, 3), corresponds to the processed image
             pose=pose_w2c,  # numpy array  (3, 4), world to camera
         )
+
+        # 输出图片名称
         print(f"Image {idx} is read from file: {sample['file_name']}")
         return sample
 
