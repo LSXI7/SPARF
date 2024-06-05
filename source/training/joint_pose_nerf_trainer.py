@@ -15,7 +15,7 @@
  """
 
 import numpy as np
-import os,sys,time
+import os, sys, time
 import torch
 from easydict import EasyDict as edict
 import matplotlib.pyplot as plt
@@ -32,7 +32,8 @@ from source.models.renderer import Graph
 import source.utils.camera as camera
 import source.utils.vis_rendering as util_vis
 from source.utils.geometry.align_trajectories import \
-    (align_ate_c2b_use_a2b, align_translations, backtrack_from_aligning_and_scaling_to_first_cam, backtrack_from_aligning_the_trajectory)
+    (align_ate_c2b_use_a2b, align_translations, backtrack_from_aligning_and_scaling_to_first_cam,
+     backtrack_from_aligning_the_trajectory)
 from source.utils.colmap_initialization.sfm import compute_sfm_pdcnet
 
 
@@ -46,22 +47,22 @@ class CommonPoseEvaluation:
         n_poses = len(self.train_data)
         valid_poses_idx = np.arange(start=0, stop=n_poses, step=1).tolist()
         index_images_excluded = []
-        
+
         if opt.camera.optimize_relative_poses:
             if opt.camera.initial_pose == 'noisy_gt':
                 # fix the x first one to the GT poses and the ones to optimize to the GT ones 
                 # + noise
                 n_poses = len(self.train_data)
                 initial_poses_w2c = pose_GT_w2c
-                n_first_fixed_poses = opt.camera.n_first_fixed_poses 
+                n_first_fixed_poses = opt.camera.n_first_fixed_poses
                 n_optimized_poses = n_poses - n_first_fixed_poses
-                
+
                 # same noise level in rotation and translation
-                se3_noise = torch.randn(n_optimized_poses, 6, device=self.device)*opt.camera.noise
+                se3_noise = torch.randn(n_optimized_poses, 6, device=self.device) * opt.camera.noise
                 pose_noise = camera.lie.se3_to_SE3(se3_noise)  # (n_optimized_poses, 3, 4)
-                pose_noise = torch.cat((torch.eye(3, 4)[None, ...].repeat(n_first_fixed_poses, 1, 1).to(self.device), 
+                pose_noise = torch.cat((torch.eye(3, 4)[None, ...].repeat(n_first_fixed_poses, 1, 1).to(self.device),
                                         pose_noise), dim=0)
-                
+
                 initial_poses_w2c = camera.pose.compose([pose_noise, initial_poses_w2c])
             elif opt.camera.initial_pose == 'given':
                 initial_poses_w2c = self.train_data.all.pose_initial.to(self.device)
@@ -73,8 +74,8 @@ class CommonPoseEvaluation:
             elif opt.camera.initial_pose == 'noisy_gt':
                 # similar to barf
                 # same noise level in rotation and translation
-                se3_noise = torch.randn(n_poses, 6, device=self.device)*opt.camera.noise
-                    
+                se3_noise = torch.randn(n_poses, 6, device=self.device) * opt.camera.noise
+
                 pose_noise = camera.lie.se3_to_SE3(se3_noise)
                 initial_poses_w2c = camera.pose.compose([pose_noise, pose_GT_w2c])
             elif opt.camera.initial_pose == 'given':
@@ -87,23 +88,33 @@ class CommonPoseEvaluation:
                 if self.settings.train_sub is not None and self.settings.train_sub != 0:
                     directory_save = os.path.join(directory_save, 'subset_{}'.format(self.settings.train_sub))
                 directory_save = os.path.join(directory_save, self.settings.scene)
-                
+
                 directory = directory_save
                 os.makedirs(directory_save, exist_ok=True)
 
                 if self.settings.load_colmap_depth:
                     if 'pdcnet' in opt.camera.initial_pose:
                         initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
-                        colmap_conf_map = compute_sfm_pdcnet(opt=self.settings, data_dict=self.train_data.all, 
-                                                             save_dir=directory, 
-                                                             load_colmap_depth=True)
+                            colmap_conf_map = compute_sfm_pdcnet(opt=self.settings, data_dict=self.train_data.all,
+                                                                 save_dir=directory,
+                                                                 load_colmap_depth=True)
+                    elif 'custom' in opt.camera.initial_pose:
+                        keypoints_file = opt.camera.keypoints_file
+                        matches_file = opt.camera.matches_file
+                        initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
+                            colmap_conf_map = run_colmap_with_custom_features(opt=self.settings,
+                                                                              data_dict=self.train_data.all,
+                                                                              save_dir=directory,
+                                                                              keypoints_file=keypoints_file,
+                                                                              matches_file=matches_file,
+                                                                              load_colmap_depth=True)
                     else:
                         raise ValueError
 
                     initial_poses_w2c = initial_poses_w2c.to(self.device).float()
-                     # pre-aligned initial poses to the ground-truth one
-                     # this is important so that scene is still more or less centered around 0
-                    initial_poses_w2c, ssim_est_gt_c2w = self.prealign_w2c_small_camera_systems\
+                    # pre-aligned initial poses to the ground-truth one
+                    # this is important so that scene is still more or less centered around 0
+                    initial_poses_w2c, ssim_est_gt_c2w = self.prealign_w2c_small_camera_systems \
                         (opt, initial_poses_w2c[:, :3], pose_GT_w2c[:, :3])
                     trans_scaling = ssim_est_gt_c2w.s
 
@@ -113,11 +124,21 @@ class CommonPoseEvaluation:
                     if 'pdcnet' in opt.camera.initial_pose:
                         initial_poses_w2c, valid_poses_idx, index_images_excluded = \
                             compute_sfm_pdcnet(opt=self.settings, data_dict=self.train_data.all, save_dir=directory)
+                    elif 'custom' in opt.camera.initial_pose:
+                        keypoints_file = opt.camera.keypoints_file
+                        matches_file = opt.camera.matches_file
+                        initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
+                            colmap_conf_map = run_colmap_with_custom_features(opt=self.settings,
+                                                                              data_dict=self.train_data.all,
+                                                                              save_dir=directory,
+                                                                              keypoints_file=keypoints_file,
+                                                                              matches_file=matches_file,
+                                                                              load_colmap_depth=True)
                     else:
                         raise ValueError
 
                     initial_poses_w2c = initial_poses_w2c.to(self.device).float()
-                    initial_poses_w2c, ssim_est_gt_c2w = self.prealign_w2c_small_camera_systems\
+                    initial_poses_w2c, ssim_est_gt_c2w = self.prealign_w2c_small_camera_systems \
                         (opt, initial_poses_w2c[:, :3], pose_GT_w2c[:, :3])
                     trans_scaling = ssim_est_gt_c2w.s
             else:
@@ -125,7 +146,7 @@ class CommonPoseEvaluation:
         return initial_poses_w2c[:, :3], valid_poses_idx, index_images_excluded
 
     @torch.no_grad()
-    def prealign_w2c_large_camera_systems(self,opt: Dict[str, Any],pose_w2c: torch.Tensor,
+    def prealign_w2c_large_camera_systems(self, opt: Dict[str, Any], pose_w2c: torch.Tensor,
                                           pose_GT_w2c: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """Compute the 3D similarity transform relating pose_w2c to pose_GT_w2c. Save the inverse 
         transformation for the evaluation, where the test poses must be transformed to the coordinate 
@@ -141,8 +162,8 @@ class CommonPoseEvaluation:
 
         if self.settings.camera.n_first_fixed_poses > 1:
             # the trajectory should be consistent with the first poses 
-            ssim_est_gt_c2w = edict(R=torch.eye(3,device=self.device).unsqueeze(0), 
-                                    t=torch.zeros(1,3,1,device=self.device), s=1.)
+            ssim_est_gt_c2w = edict(R=torch.eye(3, device=self.device).unsqueeze(0),
+                                    t=torch.zeros(1, 3, 1, device=self.device), s=1.)
             pose_aligned_w2c = pose_w2c
         else:
             try:
@@ -152,12 +173,12 @@ class CommonPoseEvaluation:
             except:
                 self.logger.info("warning: SVD did not converge...")
                 pose_aligned_w2c = pose_w2c
-                ssim_est_gt_c2w = edict(R=torch.eye(3,device=self.device).unsqueeze(0), type='traj_align', 
-                                        t=torch.zeros(1,3,1,device=self.device), s=1.)
+                ssim_est_gt_c2w = edict(R=torch.eye(3, device=self.device).unsqueeze(0), type='traj_align',
+                                        t=torch.zeros(1, 3, 1, device=self.device), s=1.)
         return pose_aligned_w2c, ssim_est_gt_c2w
 
     @torch.no_grad()
-    def prealign_w2c_small_camera_systems(self,opt: Dict[str, Any],pose_w2c: torch.Tensor,
+    def prealign_w2c_small_camera_systems(self, opt: Dict[str, Any], pose_w2c: torch.Tensor,
                                           pose_GT_w2c: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """Compute the transformation from pose_w2c to pose_GT_w2c by aligning the each pair of pose_w2c 
         to the corresponding pair of pose_GT_w2c and computing the scaling. This is more robust than the
@@ -170,7 +191,8 @@ class CommonPoseEvaluation:
             pose_w2c (torch.Tensor): Shape is (B, 3, 4)
             pose_GT_w2c (torch.Tensor): Shape is (B, 3, 4)
         """
-        def alignment_function(poses_c2w_from_padded: torch.Tensor, 
+
+        def alignment_function(poses_c2w_from_padded: torch.Tensor,
                                poses_c2w_to_padded: torch.Tensor, idx_a: int, idx_b: int):
             """Args: FInd alignment function between two poses at indixes ix_a and idx_n
 
@@ -207,7 +229,7 @@ class CommonPoseEvaluation:
             poses_aligned_c2w = transformation_from_to[None] @ poses_c2w_from_padded
 
             poses_aligned_w2c = camera.pose_inverse_4x4(poses_aligned_c2w)
-            ssim_est_gt_c2w = edict(R=transformation_from_to[:3, :3].unsqueeze(0), type='traj_align', 
+            ssim_est_gt_c2w = edict(R=transformation_from_to[:3, :3].unsqueeze(0), type='traj_align',
                                     t=transformation_from_to[:3, 3].reshape(1, 3, 1), s=scale)
 
             return poses_aligned_w2c[:, :3], ssim_est_gt_c2w
@@ -218,8 +240,8 @@ class CommonPoseEvaluation:
 
         if self.settings.camera.n_first_fixed_poses > 1:
             # the trajectory should be consistent with the first poses 
-            ssim_est_gt_c2w = edict(R=torch.eye(3,device=self.device).unsqueeze(0), 
-                                    t=torch.zeros(1,3,1,device=self.device), s=1.)
+            ssim_est_gt_c2w = edict(R=torch.eye(3, device=self.device).unsqueeze(0),
+                                    t=torch.zeros(1, 3, 1, device=self.device), s=1.)
             pose_aligned_w2c = pose_w2c
         else:
             # try every combination of pairs and get the rotation/translation
@@ -234,15 +256,15 @@ class CommonPoseEvaluation:
                 for pair_id_1 in range(min(B, 10)):
                     if pair_id_0 == pair_id_1:
                         continue
-                    
-                    pose_aligned_w2c_, ssim_est_gt_c2w_ = alignment_function\
+
+                    pose_aligned_w2c_, ssim_est_gt_c2w_ = alignment_function \
                         (camera.pad_poses(pose_c2w), camera.pad_poses(pose_GT_c2w),
                          pair_id_0, pair_id_1)
                     pose_aligned_w2c_list.append(pose_aligned_w2c_)
-                    ssim_est_gt_c2w_list.append(ssim_est_gt_c2w_ )
+                    ssim_est_gt_c2w_list.append(ssim_est_gt_c2w_)
 
                     error = self.evaluate_camera_alignment(opt, pose_aligned_w2c_, pose_GT_w2c)
-                    error_R_list.append(error.R.mean().item() * 180. / np.pi )
+                    error_R_list.append(error.R.mean().item() * 180. / np.pi)
                     error_t_list.append(error.t.mean().item())
                     full_error.append(error.t.mean().item() * (error.R.mean().item() * 180. / np.pi))
 
@@ -254,7 +276,7 @@ class CommonPoseEvaluation:
         return pose_aligned_w2c, ssim_est_gt_c2w
 
     @torch.no_grad()
-    def evaluate_camera_alignment(self,opt: Dict[str, Any],pose_aligned_w2c: torch.Tensor,
+    def evaluate_camera_alignment(self, opt: Dict[str, Any], pose_aligned_w2c: torch.Tensor,
                                   pose_GT_w2c: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
         Measures rotation and translation error between aligned and ground-truth world-to-camera poses. 
@@ -272,22 +294,22 @@ class CommonPoseEvaluation:
         pose_aligned_c2w = camera.pose.invert(pose_aligned_w2c)
         pose_GT_c2w = camera.pose.invert(pose_GT_w2c)
 
-        R_aligned_c2w,t_aligned_c2w = pose_aligned_c2w.split([3,1],dim=-1)
+        R_aligned_c2w, t_aligned_c2w = pose_aligned_c2w.split([3, 1], dim=-1)
         # R_aligned is (B, 3, 3)
         t_aligned_c2w = t_aligned_c2w.reshape(-1, 3)  # (B, 3)
 
-        R_GT_c2w,t_GT_c2w = pose_GT_c2w.split([3,1],dim=-1)
+        R_GT_c2w, t_GT_c2w = pose_GT_c2w.split([3, 1], dim=-1)
         t_GT_c2w = t_GT_c2w.reshape(-1, 3)
 
-        R_error = camera.rotation_distance(R_aligned_c2w,R_GT_c2w)
-        
+        R_error = camera.rotation_distance(R_aligned_c2w, R_GT_c2w)
+
         t_error = (t_aligned_c2w - t_GT_c2w).norm(dim=-1)
 
-        error = edict(R=R_error,t=t_error)  # not meaned here
+        error = edict(R=R_error, t=t_error)  # not meaned here
         return error
-    
+
     @torch.no_grad()
-    def evaluate_any_poses(self, opt: Dict[str, Any], pose_w2c: torch.Tensor, 
+    def evaluate_any_poses(self, opt: Dict[str, Any], pose_w2c: torch.Tensor,
                            pose_GT_w2c: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Evaluates rotation and translation errors before and after alignment. 
 
@@ -297,27 +319,28 @@ class CommonPoseEvaluation:
             pose_GT_w2c (torch.Tensor): Shape is (B, 3, 4)
         """
         stats_dict = {}
-        error = self.evaluate_camera_alignment(opt,pose_w2c.detach(),pose_GT_w2c)
+        error = self.evaluate_camera_alignment(opt, pose_w2c.detach(), pose_GT_w2c)
         stats_dict['error_R_before_align'] = error.R.mean() * 180. / np.pi  # radtodeg
         stats_dict['error_t_before_align'] = error.t.mean()
 
         if pose_w2c.shape[0] > 10:
-            pose_aligned,_ = self.prealign_w2c_large_camera_systems(opt,pose_w2c.detach(),pose_GT_w2c)
+            pose_aligned, _ = self.prealign_w2c_large_camera_systems(opt, pose_w2c.detach(), pose_GT_w2c)
         else:
-            pose_aligned,_ = self.prealign_w2c_small_camera_systems(opt,pose_w2c.detach(),pose_GT_w2c)
-        error = self.evaluate_camera_alignment(opt,pose_aligned,pose_GT_w2c)
+            pose_aligned, _ = self.prealign_w2c_small_camera_systems(opt, pose_w2c.detach(), pose_GT_w2c)
+        error = self.evaluate_camera_alignment(opt, pose_aligned, pose_GT_w2c)
         stats_dict['error_R'] = error.R.mean() * 180. / np.pi  # radtodeg
         stats_dict['error_t'] = error.t.mean()
         return stats_dict
 
     @torch.no_grad()
-    def evaluate_poses(self, opt: Dict[str, Any], 
-                       idx_optimized_pose: List[int]=None) -> Dict[str, torch.Tensor]: 
-        pose,pose_GT = self.get_all_training_poses(opt, idx_optimized_pose=idx_optimized_pose)
+    def evaluate_poses(self, opt: Dict[str, Any],
+                       idx_optimized_pose: List[int] = None) -> Dict[str, torch.Tensor]:
+        pose, pose_GT = self.get_all_training_poses(opt, idx_optimized_pose=idx_optimized_pose)
         return self.evaluate_any_poses(opt, pose, pose_GT)
 
-    def visualize_any_poses(self, opt: Dict[str, Any], pose_w2c: torch.Tensor, pose_ref_w2c: torch.Tensor, 
-                            step: int=0, idx_optimized_pose: List[int]=None, split: str="train") -> Dict[str, torch.Tensor]:
+    def visualize_any_poses(self, opt: Dict[str, Any], pose_w2c: torch.Tensor, pose_ref_w2c: torch.Tensor,
+                            step: int = 0, idx_optimized_pose: List[int] = None, split: str = "train") -> Dict[
+        str, torch.Tensor]:
         """Plot the current poses versus the reference ones, before and after alignment. 
 
         Args:
@@ -327,78 +350,75 @@ class CommonPoseEvaluation:
             step (int, optional): Defaults to 0.
             split (str, optional): Defaults to "train".
         """
-        
-        plotting_dict = {}
-        fig = plt.figure(figsize=(20,10) if 'nerf_synthetic' in opt.dataset else ((16,8)))
 
+        plotting_dict = {}
+        fig = plt.figure(figsize=(20, 10) if 'nerf_synthetic' in opt.dataset else ((16, 8)))
 
         # we show the poses without the alignment here
         pose_aligned, pose_ref = pose_w2c.detach().cpu(), pose_ref_w2c.detach().cpu()
         if 'llff' in opt.dataset:
-            pose_vis = util_vis.plot_save_poses(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,ep=self.iteration)
+            pose_vis = util_vis.plot_save_poses(opt, fig, pose_aligned, pose_ref_w2c=pose_ref, ep=self.iteration)
         else:
 
-            pose_vis = util_vis.plot_save_poses_blender(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,
+            pose_vis = util_vis.plot_save_poses_blender(opt, fig, pose_aligned, pose_ref_w2c=pose_ref,
                                                         ep=self.iteration)
-        
+
         '''
         if self.settings.debug:
             import imageio
             imageio.imwrite('pose_before_align_{}.png'.format(self.iteration), pose_vis)
         '''
-        pose_vis = torch.from_numpy(pose_vis.astype(np.float32)/255.).permute(2, 0, 1)
+        pose_vis = torch.from_numpy(pose_vis.astype(np.float32) / 255.).permute(2, 0, 1)
         plotting_dict['poses_before_align'] = pose_vis
 
         # trajectory alignment
         if pose_w2c.shape[0] > 9:
             # the alignement will work well when more than 10 poses are available
-            pose_aligned,_ = self.prealign_w2c_large_camera_systems(opt,pose_w2c.detach(),pose_ref_w2c)
+            pose_aligned, _ = self.prealign_w2c_large_camera_systems(opt, pose_w2c.detach(), pose_ref_w2c)
         else:
             # for few number of images/poses, the above alignement doesnt work well
             # align the first camera and scale with the relative to the second
-            pose_aligned,_ = self.prealign_w2c_small_camera_systems(opt,pose_w2c.detach(),pose_ref_w2c)
-        
+            pose_aligned, _ = self.prealign_w2c_small_camera_systems(opt, pose_w2c.detach(), pose_ref_w2c)
+
         pose_aligned = pose_aligned.detach().cpu()
         if 'llff' in opt.dataset:
-            pose_vis = util_vis.plot_save_poses(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,
+            pose_vis = util_vis.plot_save_poses(opt, fig, pose_aligned, pose_ref_w2c=pose_ref,
                                                 ep=self.iteration)
         else:
-            pose_vis = util_vis.plot_save_poses_blender(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,
+            pose_vis = util_vis.plot_save_poses_blender(opt, fig, pose_aligned, pose_ref_w2c=pose_ref,
                                                         ep=self.iteration)
-        
 
-        pose_vis = torch.from_numpy(pose_vis.astype(np.float32)/255.).permute(2, 0, 1)
+        pose_vis = torch.from_numpy(pose_vis.astype(np.float32) / 255.).permute(2, 0, 1)
         plotting_dict['poses_after_align'] = pose_vis
         return plotting_dict
 
-
-    def visualize_poses(self,opt: Dict[str, Any],data_dict: Dict[str, Any],output_dict: Dict[str, Any],
-                        step: int=0,idx_optimized_pose: List[int]=None, 
-                        split: str="train") -> Dict[str, torch.Tensor]:
-        pose,pose_ref_ = self.get_all_training_poses(opt, idx_optimized_pose=idx_optimized_pose)
+    def visualize_poses(self, opt: Dict[str, Any], data_dict: Dict[str, Any], output_dict: Dict[str, Any],
+                        step: int = 0, idx_optimized_pose: List[int] = None,
+                        split: str = "train") -> Dict[str, torch.Tensor]:
+        pose, pose_ref_ = self.get_all_training_poses(opt, idx_optimized_pose=idx_optimized_pose)
         return self.visualize_any_poses(opt, pose, pose_ref_, step, split=split)
-    
+
     @torch.enable_grad()
-    def evaluate_test_time_photometric_optim(self, opt: Dict[str, Any], 
+    def evaluate_test_time_photometric_optim(self, opt: Dict[str, Any],
                                              data_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Run test-time optimization. Optimizes over data_dict.se3_refine_test"""
         # only optimizes for the test pose here
-        data_dict.se3_refine_test = torch.nn.Parameter(torch.zeros(1,6,device=self.device))
-        optimizer = getattr(torch.optim,opt.optim.algo_pose)
-        optim_pose = optimizer([dict(params=[data_dict.se3_refine_test],lr=opt.optim.lr_pose)])
-        #iterator = tqdm.trange(opt.optim.test_iter,desc="test-time optim.",leave=False,position=1)
+        data_dict.se3_refine_test = torch.nn.Parameter(torch.zeros(1, 6, device=self.device))
+        optimizer = getattr(torch.optim, opt.optim.algo_pose)
+        optim_pose = optimizer([dict(params=[data_dict.se3_refine_test], lr=opt.optim.lr_pose)])
+        # iterator = tqdm.trange(opt.optim.test_iter,desc="test-time optim.",leave=False,position=1)
         for it in range(opt.optim.test_iter):
             optim_pose.zero_grad()
-            
+
             data_dict.pose_refine_test = camera.lie.se3_to_SE3(data_dict.se3_refine_test)
-            output_dict = self.net.forward(opt,data_dict,mode="test-optim", iter=None)
+            output_dict = self.net.forward(opt, data_dict, mode="test-optim", iter=None)
 
             # current estimate of the pose
             poses_w2c = self.net.get_pose(self.settings, data_dict, mode='test-optim')  # is it world to camera
             data_dict.poses_w2c = poses_w2c
 
             # iteration needs to reflect the overall training
-            loss, stats_dict, plotting_dict = self.loss_module.compute_loss\
+            loss, stats_dict, plotting_dict = self.loss_module.compute_loss \
                 (opt, data_dict, output_dict, iteration=self.iteration, mode='test-optim')
             loss.all.backward()
             optim_pose.step()
@@ -406,17 +426,17 @@ class CommonPoseEvaluation:
         return data_dict
 
 
-
 class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation):
     """Base class for joint pose-NeRF training. Inherits from NeRFTrainerPerScene. 
     """
-    def __init__(self,opt: Dict[str, Any]):
+
+    def __init__(self, opt: Dict[str, Any]):
         super().__init__(opt)
 
     def build_pose_net(self, opt: Dict[str, Any]):
         """Defines initial poses. Define parametrization of the poses. 
         """
-        
+
         # get initial poses (which will be optimized)
         # if load_colmap_depth, it will be integrated to the data here! 
         initial_poses_w2c, valid_poses_idx, index_images_excluded = self.set_initial_poses(opt)
@@ -433,12 +453,12 @@ class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation)
                 colmap_depth = colmap_depth[mask]
                 error = torch.abs(depth_gt - colmap_depth).mean()
                 self.write_event('train', {'colmap_depth_err': error}, self.iteration)
-            
+
         assert len(valid_poses_idx) + len(index_images_excluded) == initial_poses_w2c.shape[0]
 
         # log and save to tensorboard initial pose errors
-        self.logger.critical('Found {}/{} valid initial poses'\
-            .format(len(valid_poses_idx), initial_poses_w2c.shape[0]))
+        self.logger.critical('Found {}/{} valid initial poses' \
+                             .format(len(valid_poses_idx), initial_poses_w2c.shape[0]))
 
         # evaluate initial poses
         pose_GT = self.train_data.get_all_camera_poses(opt).to(self.device)
@@ -454,87 +474,88 @@ class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation)
         # define pose parametrization
         if opt.camera.pose_parametrization == 'axis_angle':
             # initially used in barf
-            self.pose_net = AxisRotationPoseParameters(opt, nbr_poses=len(self.train_data), 
-                                                       initial_poses_w2c=initial_poses_w2c, 
+            self.pose_net = AxisRotationPoseParameters(opt, nbr_poses=len(self.train_data),
+                                                       initial_poses_w2c=initial_poses_w2c,
                                                        device=self.device)
         elif opt.camera.pose_parametrization == 'two_columns':
             # used in scnet, gbarf
             # optimize camera to pose, the two first columns of rotation matrix + translation vector
-            self.pose_net = FirstTwoColunmnsPoseParameters(opt, nbr_poses=len(self.train_data), 
-                                                           initial_poses_w2c=initial_poses_w2c, 
+            self.pose_net = FirstTwoColunmnsPoseParameters(opt, nbr_poses=len(self.train_data),
+                                                           initial_poses_w2c=initial_poses_w2c,
                                                            device=self.device)
-        elif opt.camera.pose_parametrization == 'quaternion': 
-            self.pose_net = QuaternionsPoseParameters(opt, nbr_poses=len(self.train_data), 
-                                                      initial_poses_w2c=initial_poses_w2c, 
+        elif opt.camera.pose_parametrization == 'quaternion':
+            self.pose_net = QuaternionsPoseParameters(opt, nbr_poses=len(self.train_data),
+                                                      initial_poses_w2c=initial_poses_w2c,
                                                       device=self.device)
         else:
             raise ValueError
-        return 
+        return
 
     def build_nerf_net(self, opt: Dict[str, Any], pose_net: torch.nn.Module):
         self.logger.info('Creating NerF model for joint pose-NeRF training')
         self.net = Graph(opt, self.device, pose_net)
         return
 
-    def build_networks(self,opt: Dict[str, Any]):
+    def build_networks(self, opt: Dict[str, Any]):
         self.logger.info("building networks...")
 
         if opt.use_flow:
             self.build_correspondence_net(opt)
 
-        self.build_pose_net(opt) 
+        self.build_pose_net(opt)
 
         self.build_nerf_net(opt, self.pose_net)
-        
-        plotting_dict = self.visualize_poses\
-            (opt,data_dict=None,output_dict=None,step=0, split='train')
-        self.write_image('train', plotting_dict, self.iteration)
-        return 
 
-    def setup_optimizer(self,opt: Dict[str, Any]):
+        plotting_dict = self.visualize_poses \
+            (opt, data_dict=None, output_dict=None, step=0, split='train')
+        self.write_image('train', plotting_dict, self.iteration)
+        return
+
+    def setup_optimizer(self, opt: Dict[str, Any]):
         super().setup_optimizer(opt)
         self.logger.info('setting up optimizer for camera poses')
 
-        optimizer = getattr(torch.optim,opt.optim.algo_pose)
+        optimizer = getattr(torch.optim, opt.optim.algo_pose)
         self.optimizer_pose = optimizer([dict(params=self.pose_net.parameters(),
                                               lr=opt.optim.lr_pose)])
         # set up scheduler
         if opt.optim.sched_pose:
             self.logger.info('setting up scheduler for camera poses')
-            scheduler = getattr(torch.optim.lr_scheduler,opt.optim.sched_pose.type)
+            scheduler = getattr(torch.optim.lr_scheduler, opt.optim.sched_pose.type)
             if opt.optim.lr_pose_end:
-                assert(opt.optim.sched_pose.type=="ExponentialLR")
+                assert (opt.optim.sched_pose.type == "ExponentialLR")
                 max_iter = opt.optim.max_iter if hasattr(opt.optim, 'max_iter') else opt.max_iter
-                opt.optim.sched_pose.gamma = (opt.optim.lr_pose_end/opt.optim.lr_pose)**(1./max_iter)
-            kwargs = { k:v for k,v in opt.optim.sched_pose.items() if k!="type" }
-            self.scheduler_pose = scheduler(self.optimizer_pose,**kwargs)
-        return 
-        
+                opt.optim.sched_pose.gamma = (opt.optim.lr_pose_end / opt.optim.lr_pose) ** (1. / max_iter)
+            kwargs = {k: v for k, v in opt.optim.sched_pose.items() if k != "type"}
+            self.scheduler_pose = scheduler(self.optimizer_pose, **kwargs)
+        return
+
     def update_parameters(self, loss_out: Dict[str, Any]):
         """Update NeRF MLP parameters and pose parameters"""
         if self.settings.optim.warmup_pose:
             # simple linear warmup of pose learning rate
-            self.optimizer_pose.param_groups[0]["lr_orig"] = self.optimizer_pose.param_groups[0]["lr"] # cache the original learning rate
-            self.optimizer_pose.param_groups[0]["lr"] *= min(1,self.iteration/self.settings.optim.warmup_pose)
+            self.optimizer_pose.param_groups[0]["lr_orig"] = self.optimizer_pose.param_groups[0][
+                "lr"]  # cache the original learning rate
+            self.optimizer_pose.param_groups[0]["lr"] *= min(1, self.iteration / self.settings.optim.warmup_pose)
 
         loss_out.backward()
 
         # camera update
         if self.iteration % self.grad_acc_steps == 0:
-            do_backprop = self.after_backward(self.pose_net, self.iteration, 
-                                              gradient_clipping=self.settings.pose_gradient_clipping) 
+            do_backprop = self.after_backward(self.pose_net, self.iteration,
+                                              gradient_clipping=self.settings.pose_gradient_clipping)
             if do_backprop:
                 self.optimizer_pose.step()
 
             self.optimizer_pose.zero_grad()  # puts the gradient to zero for the poses
 
             if self.settings.optim.warmup_pose:
-                self.optimizer_pose.param_groups[0]["lr"] = self.optimizer_pose.param_groups[0]["lr_orig"] 
+                self.optimizer_pose.param_groups[0]["lr"] = self.optimizer_pose.param_groups[0]["lr_orig"]
                 # reset learning rate
             if self.settings.optim.sched_pose: self.scheduler_pose.step()
 
         # backprop of the nerf network
-        do_backprop = self.after_backward(self.net.get_network_components(), self.iteration, 
+        do_backprop = self.after_backward(self.net.get_network_components(), self.iteration,
                                           gradient_clipping=self.settings.nerf_gradient_clipping)
         if self.iteration % self.grad_acc_steps == 0:
             if do_backprop:
@@ -550,51 +571,51 @@ class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation)
 
     @torch.no_grad()
     def inference(self):
-        pose,pose_GT = self.get_all_training_poses(self.settings)
+        pose, pose_GT = self.get_all_training_poses(self.settings)
 
         # computes the alignement between optimized poses and gt ones. Will be used to transform the test
         # poses to coordinate system of optimized poses for the evaluation. 
         if pose.shape[0] > 9:
             # alignment of the trajectory
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings, pose, pose_GT)
         else:
             # alignment of the first cameras
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings, pose, pose_GT)
         super().inference()
-        return 
+        return
 
     @torch.no_grad()
     def inference_debug(self):
-        pose,pose_GT = self.get_all_training_poses(self.settings)
+        pose, pose_GT = self.get_all_training_poses(self.settings)
         # computes the alignement between optimized poses and gt ones. Will be used to transform the test
         # poses to coordinate system of optimized poses for the evaluation. 
         if pose.shape[0] > 9:
             # alignment of the trajectory
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings, pose, pose_GT)
         else:
             # alignment of the first cameras
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings, pose, pose_GT)
         super().inference_debug()
-        return 
+        return
 
     @torch.no_grad()
     def generate_videos_synthesis(self, opt: Dict[str, Any]):
-        pose,pose_GT = self.get_all_training_poses(self.settings)
+        pose, pose_GT = self.get_all_training_poses(self.settings)
         if pose.shape[0] > 9:
             # alignment of the trajectory
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(self.settings, pose, pose_GT)
         else:
             # alignment of the first cameras
-            _,self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings,pose,pose_GT)
+            _, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(self.settings, pose, pose_GT)
         super().generate_videos_synthesis(opt)
-        return 
+        return
 
     @torch.no_grad()
-    def make_result_dict(self,opt: Dict[str, Any],data_dict: Dict[str, Any],output_dict: Dict[str, Any],
-                         loss: Dict[str, Any],metric: Dict[str, Any]=None,split: str="train"):
+    def make_result_dict(self, opt: Dict[str, Any], data_dict: Dict[str, Any], output_dict: Dict[str, Any],
+                         loss: Dict[str, Any], metric: Dict[str, Any] = None, split: str = "train"):
         """Make logging dict. Corresponds to dictionary which will be saved in tensorboard and also logged"""
-        stats_dict = super().make_result_dict(opt,data_dict,output_dict,loss,metric=metric,split=split)
-        if split=="train":
+        stats_dict = super().make_result_dict(opt, data_dict, output_dict, loss, metric=metric, split=split)
+        if split == "train":
             # log learning rate
             if hasattr(self, 'optimizer_pose'):
                 lr = self.optimizer_pose.param_groups[0]["lr"]
@@ -602,50 +623,51 @@ class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation)
         return stats_dict
 
     @torch.no_grad()
-    def make_results_dict_low_freq(self,opt: Dict[str, Any],data_dict: Dict[str, Any],output_dict: Dict[str, Any],
-                                   loss: Dict[str, Any],metric: Dict[str, Any]=None,split:str="train") -> Dict[str, torch.Tensor]:
+    def make_results_dict_low_freq(self, opt: Dict[str, Any], data_dict: Dict[str, Any], output_dict: Dict[str, Any],
+                                   loss: Dict[str, Any], metric: Dict[str, Any] = None, split: str = "train") -> Dict[
+        str, torch.Tensor]:
         """Make logging dict. Corresponds to dictionary which will be saved in tensorboard and also logged"""
         stats_dict = {}
         # compute pose error, this is heavy, so just compute it after x iterations
-        if split=="train":
+        if split == "train":
             stats_dict = self.evaluate_poses(opt)
         return stats_dict
 
     @torch.no_grad()
-    def visualize(self,opt: Dict[str, Any],data_dict: Dict[str, Any],output_dict: Dict[str, Any],
-                  step: int=0, split: str="train") -> Dict[str, torch.Tensor]:
-        plotting_dict = super().visualize(opt,data_dict, output_dict, step=step,split=split)
+    def visualize(self, opt: Dict[str, Any], data_dict: Dict[str, Any], output_dict: Dict[str, Any],
+                  step: int = 0, split: str = "train") -> Dict[str, torch.Tensor]:
+        plotting_dict = super().visualize(opt, data_dict, output_dict, step=step, split=split)
         if split == 'train' and step == 0:
             # only does that once
-            plotting_dict_ = self.visualize_poses(opt,data_dict,output_dict,step,split=split)
+            plotting_dict_ = self.visualize_poses(opt, data_dict, output_dict, step, split=split)
             plotting_dict.update(plotting_dict_)
         return plotting_dict
 
     @torch.no_grad()
-    def get_all_training_poses(self,opt: Dict[str, Any], 
-                               idx_optimized_pose: List[int]=None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_all_training_poses(self, opt: Dict[str, Any],
+                               idx_optimized_pose: List[int] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         # get ground-truth (canonical) camera poses
         pose_GT_w2c = self.train_data.get_all_camera_poses(opt).to(self.device)
-        pose_w2c = self.net.pose_net.get_w2c_poses()  
+        pose_w2c = self.net.pose_net.get_w2c_poses()
         if idx_optimized_pose is not None:
             pose_GT_w2c = pose_GT_w2c[idx_optimized_pose].reshape(-1, 3, 4)
             pose_w2c = pose_w2c[idx_optimized_pose].reshape(-1, 3, 4)
         return pose_w2c, pose_GT_w2c
 
     @torch.no_grad()
-    def evaluate_full(self,opt: Dict[str, Any], plot: bool=False, save_ind_files: bool=False, 
-                      out_scene_dir: str='') -> Dict[str, torch.Tensor]:
+    def evaluate_full(self, opt: Dict[str, Any], plot: bool = False, save_ind_files: bool = False,
+                      out_scene_dir: str = '') -> Dict[str, torch.Tensor]:
         self.net.eval()
         # evaluate rotation/translation
-        pose,pose_GT = self.get_all_training_poses(opt)
+        pose, pose_GT = self.get_all_training_poses(opt)
         if pose.shape[0] > 9:
             # alignment of the trajectory
-            pose_aligned, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(opt,pose,pose_GT)
+            pose_aligned, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_large_camera_systems(opt, pose, pose_GT)
         else:
             # alignment of the first cameras
-            pose_aligned, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(opt,pose,pose_GT)
-            
-        error = self.evaluate_camera_alignment(opt,pose_aligned,pose_GT)
+            pose_aligned, self.net.sim3_est_to_gt_c2w = self.prealign_w2c_small_camera_systems(opt, pose, pose_GT)
+
+        error = self.evaluate_camera_alignment(opt, pose_aligned, pose_GT)
         self.logger.info("--------------------------")
         self.logger.info("rot:   {:8.3f}".format(np.rad2deg(error.R.mean().cpu())))
         self.logger.info("trans: {:10.5f}".format(error.t.mean()))
@@ -657,55 +679,57 @@ class PoseAndNerfTrainerPerScene(nerf.NerfTrainerPerScene, CommonPoseEvaluation)
         results_dict['trans_error'] = error.t.mean().item()
 
         # init error
-        results_dict['init_rot_error']= self.initial_pose_error['error_R_before_align'].item()
+        results_dict['init_rot_error'] = self.initial_pose_error['error_R_before_align'].item()
         results_dict['init_trans_error'] = self.initial_pose_error['error_t_before_align'].item()
         return results_dict
 
     @torch.no_grad()
-    def generate_videos_pose(self,opt: Dict[str, Any]):
+    def generate_videos_pose(self, opt: Dict[str, Any]):
         self.net.eval()
 
         opt.output_path = '{}/{}'.format(self._base_save_dir, self.settings.project_path)
         cam_path = "{}/poses".format(opt.output_path)
-        os.makedirs(cam_path,exist_ok=True)
+        os.makedirs(cam_path, exist_ok=True)
         ep_list = []
 
-        for ep in range(0,opt.max_iter+1,self.snapshot_steps):
+        for ep in range(0, opt.max_iter + 1, self.snapshot_steps):
             # load checkpoint (0 is random init)
-            if ep!=0:
-                checkpoint_path = '{}/{}/iter-{:04d}.pth.tar'.format(self._base_save_dir, self.settings.project_path, ep)
+            if ep != 0:
+                checkpoint_path = '{}/{}/iter-{:04d}.pth.tar'.format(self._base_save_dir, self.settings.project_path,
+                                                                     ep)
                 if not os.path.exists(checkpoint_path):
                     continue
                 self.load_snapshot(checkpoint=ep)
 
             # get the camera poses
-            pose,pose_ref = self.get_all_training_poses(opt)
-            pose_aligned,_ = self.prealign_w2c_small_camera_systems(opt,pose.detach(),pose_ref)
+            pose, pose_ref = self.get_all_training_poses(opt)
+            pose_aligned, _ = self.prealign_w2c_small_camera_systems(opt, pose.detach(), pose_ref)
             # self.evaluate_camera_alignment(opt,pose_aligned,pose_ref_)
             pose_aligned = pose_aligned.detach().cpu()
             pose_ref = pose_ref.detach().cpu()
 
-            fig = plt.figure(figsize=(16,8))
+            fig = plt.figure(figsize=(16, 8))
             if 'llff' in opt.dataset:
-                pose_vis = util_vis.plot_save_poses(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,
+                pose_vis = util_vis.plot_save_poses(opt, fig, pose_aligned, pose_ref_w2c=pose_ref,
                                                     ep=ep, path=cam_path)
             else:
-                pose_vis = util_vis.plot_save_poses_blender(opt,fig,pose_aligned,pose_ref_w2c=pose_ref,
+                pose_vis = util_vis.plot_save_poses_blender(opt, fig, pose_aligned, pose_ref_w2c=pose_ref,
                                                             ep=ep, path=cam_path)
             ep_list.append(ep)
             plt.close()
         # write videos
         self.logger.info("writing videos...")
         list_fname = "{}/temp.list".format(cam_path)
-        with open(list_fname,"w") as file:
+        with open(list_fname, "w") as file:
             for ep in ep_list: file.write("file {}.png\n".format(ep))
         cam_vid_fname = "{}/poses.mp4".format(opt.output_path)
-        os.system("ffmpeg -y -r 20 -f concat -i {0} -pix_fmt yuv420p {1} >/dev/null 2>&1".format(list_fname,cam_vid_fname))
+        os.system(
+            "ffmpeg -y -r 20 -f concat -i {0} -pix_fmt yuv420p {1} >/dev/null 2>&1".format(list_fname, cam_vid_fname))
         os.remove(list_fname)
-        return 
-        
-        
-# ============================ computation graph for forward/backprop ============================
+        return
+
+    # ============================ computation graph for forward/backprop ============================
+
 
 class Graph(Graph):
 
@@ -715,11 +739,11 @@ class Graph(Graph):
         # nerf networks already done 
         self.pose_net = pose_net
 
-    def get_w2c_pose(self,opt: Dict[str, Any],data_dict: Dict[str, Any],
-                     mode: str=None) -> torch.Tensor:
-        if mode=="train":
+    def get_w2c_pose(self, opt: Dict[str, Any], data_dict: Dict[str, Any],
+                     mode: str = None) -> torch.Tensor:
+        if mode == "train":
             pose = self.pose_net.get_w2c_poses()  # get the current estimates of the camera poses, which are optimized 
-        elif mode in ["val","eval","test-optim", "test"]:
+        elif mode in ["val", "eval", "test-optim", "test"]:
             # val is on the validation set
             # eval is during test/actual evaluation at the end 
             # align test pose to refined coordinate system (up to sim3)
@@ -735,15 +759,15 @@ class Graph(Graph):
             # Here, we align the test pose to the poses found during the optimization (otherwise wont be valid)
             # that's pose. And can learn an extra alignement on top
             # additionally factorize the remaining pose imperfection
-            if opt.optim.test_photo and mode!="val":
-                pose = camera.pose.compose([data_dict.pose_refine_test,pose])
-        else: 
+            if opt.optim.test_photo and mode != "val":
+                pose = camera.pose.compose([data_dict.pose_refine_test, pose])
+        else:
             raise ValueError
         return pose
 
-    def get_pose(self,opt: Dict[str, Any],data_dict: Dict[str, Any],mode: str=None) -> torch.Tensor:
+    def get_pose(self, opt: Dict[str, Any], data_dict: Dict[str, Any], mode: str = None) -> torch.Tensor:
         return self.get_w2c_pose(opt, data_dict, mode)
 
-    def get_c2w_pose(self,opt: Dict[str, Any],data_dict: Dict[str, Any],mode: str=None) -> torch.Tensor:
+    def get_c2w_pose(self, opt: Dict[str, Any], data_dict: Dict[str, Any], mode: str = None) -> torch.Tensor:
         w2c = self.get_w2c_pose(opt, data_dict, mode)
         return camera.pose.invert(w2c)

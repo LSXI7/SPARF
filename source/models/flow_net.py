@@ -51,10 +51,15 @@ class FlowSelectionWrapper(nn.Module):
             batch_size (int, optional): For computing the correspondence in batch. Defaults to 5.
         """
         super().__init__()
-
-        self.backbone = backbone
+        if '+' in backbone:
+            parts = backbone.split('+')
+            self.test = parts[0]
+            self.backbone = parts[1]
+        else:
+            self.test = None
+            self.backbone = backbone
         self.confidence_map_type = 'p_r'
-        self.load_flow_network(backbone, ckpt_path=ckpt_path)
+        self.load_flow_network(backbone=self.backbone, ckpt_path=ckpt_path)
 
         self.batch_size = batch_size
         self.num_views = num_views
@@ -70,7 +75,7 @@ class FlowSelectionWrapper(nn.Module):
 
         # load checkpoint
         if ckpt_path is not None:
-            self.flow_net = self.load_network(backbone, ckpt_path)
+            self.flow_net = self.load_network(backbone=self.backbone, checkpoint_path=ckpt_path)
 
         # fix_flow_weights
         self.flow_net.requires_grad_ = False
@@ -126,8 +131,12 @@ class FlowSelectionWrapper(nn.Module):
         if self.backbone == 'SPSG':
             return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot)
         elif self.backbone == 'PDCNet':
+            if self.test == 'test':
+                return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
             return self.compute_matches_pdcnet(images, combi_list_tar_src, plot, use_homography)
         elif self.backbone == 'lightglue':
+            if self.test == 'test':
+                return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
             return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot)
 
     def compute_flow_and_confidence_map_and_cc_of_combi_list(self, images, combi_list_tar_src, plot=False,
@@ -147,24 +156,30 @@ class FlowSelectionWrapper(nn.Module):
         if self.backbone == 'SPSG':
             return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot, return_dummy_cc_map=True)
         elif self.backbone == 'PDCNet':
+            if self.test == 'test':
+                return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
             return self.compute_matches_pdcnet_with_cc(images, combi_list_tar_src, plot, use_homography)
         elif self.backbone == 'lightglue':
+            if self.test == 'test':
+                return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
             return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot, return_dummy_cc_map=True)
 
-    # ---------------------------- SPSG matches --------------------------------
-    def compute_matches_spsg(self, images, combi_list_tar_src, plot=False, return_dummy_cc_map=False):
+        # ---------------------------- test matches --------------------------------
+
+    def compute_matches_test(self, images, combi_list_tar_src, plot=False, return_dummy_cc_map=False):
         '''Computing flow and confidence map of set of images given combi_list, using SuperPoint and SuperGlue.
         Args:
             images: channel first normalized tensor of images [B, C, H, W]
             combi_list: torch tensor index pairs of images that need to be computed, 2xN, the first one is the target
         Returns:
             List containing:
-                correspondence_map (torch.Tensor): correspondence map from target to source, 
+                correspondence_map (torch.Tensor): correspondence map from target to source,
                                                    shape [len(combi_list), 2/1, H, W]
-                conf_map (torch.Tensor): correspondence map from target to source, 
+                conf_map (torch.Tensor): correspondence map from target to source,
                                          shape [len(combi_list), 2/1, H, W]
                 flow_plot (torch.Tensor): image plot
         '''
+        print('进入测试程序')
         plot_ = plot and combi_list_tar_src.shape[1] < 100
         # print('combi_list_tar_src.shape: ', combi_list_tar_src.shape)
         print(combi_list_tar_src)
@@ -175,14 +190,9 @@ class FlowSelectionWrapper(nn.Module):
 
         # extract keypoints for all images
         kp_dict = {}
+        output_kp_h5 = self.flow_net.create_output_directory(base_dir='h5_save')
         # kp_dict will contain 'keypoint', 'scores'
         # in each, there is a list of lists, i.e. an element per image
-
-        # print('images.shape: ', images.shape)
-        # print('batch_size: ', batch_size)
-        # print('images_proc.shape', images_proc.shape)
-        # 得到for id in range(0,3,50)
-        # 以下是源代码
         for idx_start in range(0, images.shape[0], batch_size):
             print('idx_start: ', idx_start)
             if idx_start == images.shape[0] - 1:
@@ -231,9 +241,115 @@ class FlowSelectionWrapper(nn.Module):
             diff = torch.round(pred_kp_target) - pred_kp_target
             pred_kp_target = torch.round(pred_kp_target).long().to(images.device)
             pred_kp_source = torch.from_numpy(pred['kp_source']).to(images.device) + diff  # Nx2
-            # print('pred_kp_target: ', pred_kp_target)
-            # print('pred_kp_source: ', pred_kp_source)
+            print('pred_kp_target: ', pred_kp_target)
+            print('pred_kp_source: ', pred_kp_source)
+            # 可视化匹配，输出路径为output_base_dir
+            output_path = os.path.join(output_base_dir, f'matches_{id_source}_{id_target}.png')
+            self.flow_net.plot_matches(images_proc[id_source], images_proc[id_target], pred_kp_source,
+                                       pred_kp_target,
+                                       output_path)
 
+            if plot_:
+                plot_list.append(make_matching_plot_fast(
+                    image1=(images[id_source].permute(1, 2, 0).cpu().detach().numpy() * 255),
+                    image0=(images[id_target].permute(1, 2, 0).cpu().detach().numpy() * 255),
+                    kpts1=pred['kp_source'][:500], kpts0=pred['kp_target'][:500],
+                    text=['{} to {}'.format(id_source, id_target),
+                          '{} matches'.format(pred_kp_source.shape[0]), 'Top 500 matches']))
+            pred_conf = torch.from_numpy(pred['confidence_value']).to(images.device)
+            # print("pred_conf: ", pred_conf)
+            assert pred_kp_target.dtype == torch.long, "Indices must be integers."
+            # 检查 pred_kp_target 的形状
+            assert pred_kp_target.dim() == 2 and pred_kp_target.shape[1] == 2, "pred_kp_target should be Nx2."
+            # 检查 pred_kp_source 的形状是否匹配
+            assert pred_kp_source.dim() == 2, "pred_kp_source should be Nx2."
+
+            print("pred_kp_target.shape: ", pred_kp_target.shape)
+            max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
+            max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
+            print("max_x_value: ", max_x_value)
+            print("max_y_value: ", max_y_value)
+
+            correspondence_map[
+                idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_kp_source
+            conf_map[idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_conf.reshape(-1, 1)
+
+    # ---------------------------- SPSG matches --------------------------------
+    def compute_matches_spsg(self, images, combi_list_tar_src, plot=False, return_dummy_cc_map=False):
+        '''Computing flow and confidence map of set of images given combi_list, using SuperPoint and SuperGlue.
+        Args:
+            images: channel first normalized tensor of images [B, C, H, W]
+            combi_list: torch tensor index pairs of images that need to be computed, 2xN, the first one is the target
+        Returns:
+            List containing:
+                correspondence_map (torch.Tensor): correspondence map from target to source, 
+                                                   shape [len(combi_list), 2/1, H, W]
+                conf_map (torch.Tensor): correspondence map from target to source, 
+                                         shape [len(combi_list), 2/1, H, W]
+                flow_plot (torch.Tensor): image plot
+        '''
+        plot_ = plot and combi_list_tar_src.shape[1] < 100
+        # print('combi_list_tar_src.shape: ', combi_list_tar_src.shape)
+        print(combi_list_tar_src)
+        B, _, H, W = images.shape
+
+        images_proc = self.flow_net.pre_process_img(images * 255)
+        batch_size = 50
+
+        # extract keypoints for all images
+        kp_dict = {}
+        # kp_dict will contain 'keypoint', 'scores'
+        # in each, there is a list of lists, i.e. an element per image
+        for idx_start in range(0, images.shape[0], batch_size):
+            print('idx_start: ', idx_start)
+            if idx_start == images.shape[0] - 1:
+                print('up')
+                kp_template_dict_ = self.flow_net.get_keypoints \
+                    (images_proc[idx_start].unsqueeze(0))
+            else:
+                print('down')
+                kp_template_dict_ = self.flow_net.get_keypoints(images_proc[idx_start:idx_start + batch_size])
+                # print('kp_template_dict_: ', kp_template_dict_)
+            for k, v in kp_template_dict_.items():
+                if k in kp_dict.keys():
+                    kp_dict[k].extend(kp_template_dict_[k])
+                else:
+                    kp_dict[k] = kp_template_dict_[k]
+            torch.cuda.empty_cache()
+
+        correspondence_map = torch.zeros(combi_list_tar_src.shape[1], H, W, 2).to(images.device)
+        conf_map = torch.zeros(combi_list_tar_src.shape[1], H, W, 1).to(images.device)
+
+        # 可视化kp，输出output_dir
+        self.flow_net.visualize_keypoints(images, kp_dict, output_dir='kp_output')
+
+        # establish matches
+        # combi_list_tar_src = tensor([[0, 0, 1, 1, 2, 2],
+        #                               [1, 2, 0, 2, 0, 1]])
+        plot_list = [] if plot_ else None
+
+        # 创建match可视化输出路径
+        output_base_dir = self.flow_net.create_output_directory(base_dir='match_output')
+        for idx in range(combi_list_tar_src.shape[1]):  # (2xN) 3input--N=6
+            print('idx: ', idx)
+            id_target, id_source = combi_list_tar_src[:, idx]
+            source_kp_dict = {k: [v[id_source]] for k, v in kp_dict.items()}  # K：[v[0]]
+            target_kp_dict = {k: [v[id_target]] for k, v in kp_dict.items()}  # K：[v[1]]
+            # print('source_kp_dict: ', source_kp_dict)
+            # print('target_kp_dict: ', target_kp_dict)
+            pred = self.flow_net.get_matches_and_confidence(source_img=images_proc[id_source].unsqueeze(0),
+                                                            target_img=images_proc[id_target].unsqueeze(0),
+                                                            source_kp_dict=source_kp_dict,
+                                                            target_kp_dict=target_kp_dict,
+                                                            preprocess_image=False)
+            # print('pred', pred)
+            # 'kp_source': mkpts0, 'kp_target': mkpts1, 'confidence_value': mconf
+            pred_kp_target = torch.from_numpy(pred['kp_target']).to(images.device)  # Nx2
+            diff = torch.round(pred_kp_target) - pred_kp_target
+            pred_kp_target = torch.round(pred_kp_target).long().to(images.device)
+            pred_kp_source = torch.from_numpy(pred['kp_source']).to(images.device) + diff  # Nx2
+            print('pred_kp_target: ', pred_kp_target)
+            print('pred_kp_source: ', pred_kp_source)
             # 可视化匹配，输出路径为output_base_dir
             output_path = os.path.join(output_base_dir, f'matches_{id_source}_{id_target}.png')
             self.flow_net.plot_matches(images_proc[id_source], images_proc[id_target], pred_kp_source, pred_kp_target,
@@ -254,35 +370,36 @@ class FlowSelectionWrapper(nn.Module):
             # 检查 pred_kp_source 的形状是否匹配
             assert pred_kp_source.dim() == 2, "pred_kp_source should be Nx2."
 
+            print("pred_kp_target.shape: ", pred_kp_target.shape)
+            max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
+            max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
+            print("max_x_value: ", max_x_value)
+            print("max_y_value: ", max_y_value)
+
             correspondence_map[
                 idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_kp_source
-            # print('correspondence_map: ', correspondence_map)
             conf_map[idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_conf.reshape(-1, 1)
-            # print('pred_kp_target.shape[0]', pred_kp_target.shape[0])
-            # print('correspondence_map(0, 188, 91)', correspondence_map[0, 188, 91])
-            # 打印出相关的形状，确保一致性
-            # print("Target slice shape:", correspondence_map[idx, pred_kp_target[:, 1], pred_kp_target[:, 0]].shape)
-            # print("Source shape:", pred_kp_source.shape)
 
-            # print('conf_map: ', conf_map)
-        # print('pred_kp_target[0, 1]', pred_kp_target[0, 1])
-        # print('pred_kp_target[0, 0]', pred_kp_target[0, 0])
-        # print('pred_kp_source[0, :]', pred_kp_source[0, :])
-        # print('correspondence_map(0, 169, 191)', correspondence_map[0, 188, 91])
+        #####################稀疏性计算#####################
+        # 计算0元素的数量
         zero_elements = torch.eq(conf_map, 0).sum()
-        print('correspondence_map(0, 169, 191,1)', correspondence_map[0, 188, 91, 1])
-        print('correspondence_map(0, 169, 191,0)', correspondence_map[0, 188, 91, 0])
-        print('con_map(0, 169, 191,0)', conf_map[0, 188, 91, 0])
-
         # 计算总元素数量
         total_elements = conf_map.numel()
-
         # 计算0元素的占比
         zero_percentage = zero_elements / total_elements * 100
-
         # 打印结果
         print(f"Number of zero elements: {zero_elements.item()}")
         print(f"Percentage of zero elements: {zero_percentage:.2f}%")
+
+        # 找到最后一个维度的平面坐标是否为零的布尔掩码
+        zero_mask = torch.eq(correspondence_map, 0)
+        # 检查两个平面坐标是否同时为零（即最后一个维度的两个值都为零）
+        both_zero_mask = torch.all(zero_mask, dim=-1)
+        # 获取这些非零元素的位置
+        non_zero_positions = torch.nonzero(~both_zero_mask)
+        print('non_zero_positions: ', non_zero_positions.shape)
+        print("非零元素的位置：", non_zero_positions)
+
         ret = [correspondence_map.permute(0, 3, 1, 2), conf_map.permute(0, 3, 1, 2)]
         if return_dummy_cc_map:
             ret += [torch.ones_like(conf_map.permute(0, 3, 1, 2))]
@@ -292,7 +409,7 @@ class FlowSelectionWrapper(nn.Module):
                 plot_list = np.concatenate(plot_list, axis=0)
                 plot_list = torch.from_numpy(plot_list.astype(np.float32)).permute(2, 0, 1)
             ret += [plot_list]
-        print('\n\n\n\n\n\n\n\n', ret)
+        # print('\n\n\n\n\n\n\n\n', ret)
         return ret
 
     # --------------------- main function to compute pdcnet matches ------------------------
@@ -835,7 +952,7 @@ def flow_net_model_select(backbone, train_features=False):
             'superpoint': {
                 'descriptor_dim': 256,
                 'nms_radius': 4,
-                'keypoint_threshold': 0.005,
+                'keypoint_threshold': 0.0005,
                 'max_keypoints': -1,
                 'remove_borders': 4,
             },

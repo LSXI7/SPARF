@@ -31,7 +31,7 @@ class CorrespondenceBasedLoss(BaseLoss, CorrrespondenceUtils):
                  train_data: Dict[str, Any], device: torch.device):
         super().__init__(device=device)
         default_cfg = edict({'matching_pair_generation': 'all', 
-                             'min_nbr_matches': 500, 
+                             'min_nbr_matches': 500,
                             
                              'pairing_angle_threshold': 30, # degree, in case 'angle' pair selection chosen
                              'filter_corr_w_cc': False, 
@@ -142,6 +142,7 @@ class CorrespondenceBasedLoss(BaseLoss, CorrrespondenceUtils):
         for i in range(len(flow_pairs)):
             nbr_confident_regions = self.mask_valid_corr[i].sum()
             if nbr_confident_regions > self.opt.min_nbr_matches:
+                print('yessssssssssssssssssssssssssssssssssssssss')
                 filtered_flow_pairs.append((i, flow_pairs[i][0], flow_pairs[i][1]))
                 # corresponds to index_of_flow, index_of_target_image, index_of_source_image
         self.filtered_flow_pairs = filtered_flow_pairs

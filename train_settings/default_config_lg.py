@@ -190,14 +190,17 @@ def get_nerf_default_config_llff():
     ########################## 以下为PDC
     # cfg.flow_backbone='PDCNet'  #改这个没用，得去改/home/xyjiang/NeRF/sparf/train_settings/joint_pose_nerf_training
     # cfg.flow_ckpt_path='/data/xyjiang/NeRF/sparf/pre_trained_model/PDCNet_megadepth.pth.tar'  # change
-
-    ########################## 以下为SPSG
+    #
+    ######################### 以下为SPSG
     # cfg.flow_backbone = 'SPSG'
+    # cfg.flow_backbone = 'test+SPSG'
     # cfg.flow_ckpt_path= '/home/xyjiang/NeRF/sparf/pre_trained_model/spsg.pth.tar'
-
-    ########################## 以下为lightglue
+    #
+    ######################### 以下为lightglue
     cfg.flow_backbone = 'lightglue'
+    # cfg.flow_backbone = 'test+lightglue'
     cfg.flow_ckpt_path = None
+    # 下面这个别注释掉了，在调试代码没注释掉
     cfg.lightglue_feature = 'superpoint'  # "disk"、"aliked"、"sift"、"superpoint"、"doghardnet"
 
     ######################### END
@@ -213,7 +216,9 @@ def get_nerf_default_config_llff():
     cfg.filter_corr_w_cc = False
     cfg.min_conf_valid_corr = 0.95
     cfg.min_conf_cc_valid_corr = 1 / (1. + 1.5)
-    cfg.min_nbr_matches = 500
+    cfg.min_nbr_matches = 0  # 为稀疏
+    # 匹配额外设置
+    # cfg.min_nbr_matches = 500  # 默认设置（PDC）
     cfg.diff_loss_type = 'huber'
 
     cfg = override_options(cfg_base, cfg)

@@ -19,7 +19,7 @@
 from pathlib import Path
 from pathlib import Path
 import numpy as np
-import imageio 
+import imageio
 import os
 import torch
 import shutil
@@ -40,33 +40,30 @@ sys.path.append(str(Path(__file__).parent / '../../../third_party/Hierarchical-L
 from hloc import extract_features, match_features, pairs_from_exhaustive
 from hloc.utils.parsers import parse_retrieval
 
-
-
-
-
 mapper_options = {
-'ba_refine_focal_length': False,# arg (=1)
-'ba_refine_principal_point': False, # arg (=0)
-'ba_refine_extra_params': False, # (=1)
-'min_num_matches': 5,  # arg (=15)
-'ba_local_max_num_iterations': 25, # arg (=25)
-'ba_global_max_num_iterations': 50, # arg (=50)
-# 'init_min_tri_angle': 4, 
+    'ba_refine_focal_length': False,  # arg (=1)
+    'ba_refine_principal_point': False,  # arg (=0)
+    'ba_refine_extra_params': False,  # (=1)
+    'min_num_matches': 5,  # arg (=15)
+    'ba_local_max_num_iterations': 25,  # arg (=25)
+    'ba_global_max_num_iterations': 50,  # arg (=50)
+    # 'init_min_tri_angle': 4,
 
-# 'ransac': 
-# 'init_min_num_inliers': 25, # arg (=100)
-# 'init_max_error': 4, # arg (=4)
-# 'abs_pose_max_error': 4, # arg (=12)   # because we use much smaller images 
-# 'abs_pose_min_num_inliers': 5, # arg (=30)
-# 'abs_pose_min_inlier_ratio': 0.01, # arg (=0.25)
+    # 'ransac':
+    # 'init_min_num_inliers': 25, # arg (=100)
+    # 'init_max_error': 4, # arg (=4)
+    # 'abs_pose_max_error': 4, # arg (=12)   # because we use much smaller images
+    # 'abs_pose_min_num_inliers': 5, # arg (=30)
+    # 'abs_pose_min_inlier_ratio': 0.01, # arg (=0.25)
 }
 
-def define_pycolmap_camera(K, height, width): 
+
+def define_pycolmap_camera(K, height, width):
     """To use in HLOC. """
     focal_length = K[0, 0]
-    cx=K[0, 2]
-    cy=K[1, 2]
-    camera = pycolmap.Camera(model='SIMPLE_PINHOLE', width=width, 
+    cx = K[0, 2]
+    cy = K[1, 2]
+    camera = pycolmap.Camera(model='SIMPLE_PINHOLE', width=width,
                              height=height, params=[focal_length, cx, cy])
     return camera
 
@@ -93,7 +90,6 @@ def _load_colmap_depth(basedir: str, factor: float, height: int, width: int, sca
         os.path.join(basedir, 'images.bin'))  # 
     points = read_points3D_binary(
         os.path.join(basedir, 'points3D.bin'))
-
 
     depth_dict, weight_dict = {}, {}
 
@@ -144,9 +140,9 @@ def _load_colmap_depth(basedir: str, factor: float, height: int, width: int, sca
 
     if len(points_3d) > 0:
         depths = (pose_c2w[:3, 2].T
-                @ (np.asarray(points_3d) - pose_c2w[:3, 3]).T).T
-        weights = 2 * np.exp(-(errors / err_mean)**2)
-        
+                  @ (np.asarray(points_3d) - pose_c2w[:3, 3]).T).T
+        weights = 2 * np.exp(-(errors / err_mean) ** 2)
+
         print('Found {} colmap depth points'.format(len(y_vals)))
         depth_image[tuple(y_vals), tuple(x_vals)] = depths * scale
         weight_image[tuple(y_vals), tuple(x_vals)] = weights
@@ -156,8 +152,8 @@ def _load_colmap_depth(basedir: str, factor: float, height: int, width: int, sca
     return depth_dict, weight_dict
 
 
-def verify_colmap_depth(data_dict: Dict[str, Any], 
-                        poses_w2c: torch.Tensor, index_0: int=0, index_1: int=1):
+def verify_colmap_depth(data_dict: Dict[str, Any],
+                        poses_w2c: torch.Tensor, index_0: int = 0, index_1: int = 1):
     """Function to verify the depth from COLMAP is valid. We do this by plotting the
     correspondences (created with the depth map and the w2c image poses. """
     colmap_depth = data_dict.colmap_depth.to(poses_w2c.device)
@@ -175,17 +171,17 @@ def verify_colmap_depth(data_dict: Dict[str, Any],
     pixels_in_0 = torch.stack((pts_valid_depth_in_0_w, pts_valid_depth_in_0_h), dim=-1).float()  # (N, 2)
     depths_in_0 = colmap_depth[index_0][pts_valid_depth_in_0_h, pts_valid_depth_in_0_w]  # (N)
 
-    pixels_in_1 = batch_project_to_other_img(pixels_in_0.unsqueeze(0), di=depths_in_0.reshape(1, -1), 
-                                             Ki=intr[index_0].unsqueeze(0), Kj=intr[index_1].unsqueeze(0), 
+    pixels_in_1 = batch_project_to_other_img(pixels_in_0.unsqueeze(0), di=depths_in_0.reshape(1, -1),
+                                             Ki=intr[index_0].unsqueeze(0), Kj=intr[index_1].unsqueeze(0),
                                              T_itoj=relative_0_to_1.unsqueeze(0))
     pixels_in_1 = pixels_in_1.reshape(-1, 2)
     image_plot = make_matching_plot_fast(
-        images_numpy[index_0], images_numpy[index_1], 
-        kpts0=pixels_in_0.cpu().numpy().astype(np.int64)[::100], 
-        kpts1=pixels_in_1.cpu().numpy().astype(np.int64)[::100], 
-        color=None, 
+        images_numpy[index_0], images_numpy[index_1],
+        kpts0=pixels_in_0.cpu().numpy().astype(np.int64)[::100],
+        kpts1=pixels_in_1.cpu().numpy().astype(np.int64)[::100],
+        color=None,
         path='/home/jupyter/shared/colmap_matches_{}_to_{}.png'.format(index_0, index_1))
-    return 
+    return
 
 
 def get_poses_and_depths_and_idx(sfm_dir: str, image_list: List[str], B: int, H: int, W: int):
@@ -279,14 +275,14 @@ def get_poses_and_idx(sfm_dir: str, image_list: List[str], B: int, H: int, W: in
         initial_poses_w2c = torch.from_numpy(initial_poses_w2c)
     else:
         print('Reconstruction failed')
-        excluded_poses_idx = np.arange(start=0, stop=len(image_list), step=1).tolist() # all identity
+        excluded_poses_idx = np.arange(start=0, stop=len(image_list), step=1).tolist()  # all identity
         # valid_poses_idx = np.arange(start=0, stop=len(image_list), step=1).tolist()
         initial_poses_w2c = torch.eye(4).unsqueeze(0).repeat(B, 1, 1)
     return initial_poses_w2c, valid_poses_idx, excluded_poses_idx
 
 
-def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any], 
-                      save_dir: str, load_colmap_depth: bool=False):
+def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
+                      save_dir: str, load_colmap_depth: bool = False):
     """COLMAP with SuperPoint-SuperGlue. That is the default hloc. """
 
     outputs = Path(save_dir) / 'init_sfm'
@@ -295,9 +291,9 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
     sfm_pairs = outputs / 'pairs-exhaustive.txt'
     sfm_dir = outputs / 'sfm_superpoint+superglue'
 
-    feature_conf = extract_features.confs['superpoint_max']  
+    feature_conf = extract_features.confs['superpoint_max']
     matcher_conf = match_features.confs['superglue']
-    matcher_conf['model']['weights'] =  'outdoor'
+    matcher_conf['model']['weights'] = 'outdoor'
 
     # get image list 
     rgb_paths = data_dict.rgb_path
@@ -305,7 +301,7 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
     image_list = [os.path.basename(path) for path in rgb_paths]
     images = (data_dict.image.permute(0, 2, 3, 1).detach().cpu().numpy() * 255).astype(np.uint8)
     B, H, W = images.shape[:3]
-    
+
     overwrite = False
 
     if not os.path.exists(str(sfm_dir / 'images.bin')) or overwrite:
@@ -320,24 +316,25 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
         pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
 
         # Extract and match local features
-        feature_path = extract_features.main(feature_conf, Path(image_dir), outputs, 
+        feature_path = extract_features.main(feature_conf, Path(image_dir), outputs,
                                              overwrite=overwrite)
-        match_path = match_features.main(matcher_conf, sfm_pairs, feature_conf['output'], 
+        match_path = match_features.main(matcher_conf, sfm_pairs, feature_conf['output'],
                                          outputs, overwrite=overwrite)
 
         camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
-        model = reconstruction_w_known_intrinsics\
-            (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path, 
-            camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=False, verbose_features=True,   
-            mapper_options=mapper_options)
+        model = reconstruction_w_known_intrinsics \
+            (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path,
+             camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=False,
+             verbose_features=True,
+             mapper_options=mapper_options)
 
     if load_colmap_depth:
         return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
     return get_poses_and_idx(sfm_dir, image_list, B, H, W)
 
 
-def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any], 
-                       save_dir: str, load_colmap_depth: bool=False):
+def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
+                       save_dir: str, load_colmap_depth: bool = False):
     """Run COLMAP with PDC-Net. """
     # set-up the paths
     outputs = Path(save_dir) / 'init_sfm'
@@ -351,7 +348,7 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
     # cfg
     cfg = edict(pdcnet_utils.default_pdcnet_cfg)
     cfg['path_to_pre_trained_models'] = os.path.dirname(opt.flow_ckpt_path)
-    #'/home/jupyter/shared/pre_trained_models'
+    # '/home/jupyter/shared/pre_trained_models'
 
     # get image list 
     rgb_paths = data_dict.rgb_path
@@ -359,7 +356,7 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
     image_list = [os.path.basename(path) for path in rgb_paths]
     images = (data_dict.image.permute(0, 2, 3, 1).detach().cpu().numpy() * 255).astype(np.uint8)
     B, H, W = images.shape[:3]
-    
+
     overwrite = False
     if not os.path.exists(str(sfm_dir / 'images.bin')) or overwrite:
         # create a fake image dir and save the images there
@@ -368,11 +365,11 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
             os.makedirs(image_dir)
         for image_id, image_name in enumerate(image_list):
             imageio.imwrite(os.path.join(image_dir, image_name), images[image_id])
-        
+
         # get name of the images
         rgb_paths = data_dict.rgb_path
         images_name = [os.path.basename(path) for path in rgb_paths]
-        
+
         # list of all iamge pairs 
         pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
         # saved in path at sfm_pairs
@@ -393,16 +390,66 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
                 path_to_h5_keypoints=os.path.join(save_dir, name_file + '_keypoints.h5'), key_for_keypoints='keypoints',
                 name_to_pair_function='names_to_pair')
 
-            match_path = pdcnet_utils.save_matches_to_h5(matches_dict, pairs, export_dir=save_dir, match_name=name_file, overwrite=cfg.overwrite)
-        
-        #3D reconstruction
-        #Run COLMAP on the features and matches.
+            match_path = pdcnet_utils.save_matches_to_h5(matches_dict, pairs, export_dir=save_dir, match_name=name_file,
+                                                         overwrite=cfg.overwrite)
+
+        # 3D reconstruction
+        # Run COLMAP on the features and matches.
         camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
-        model = reconstruction_w_known_intrinsics\
-            (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path, 
-            camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=True,  
-            mapper_options=mapper_options)
+        model = reconstruction_w_known_intrinsics \
+            (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path,
+             camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=True,
+             mapper_options=mapper_options)
 
     if load_colmap_depth:
         return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
     return get_poses_and_idx(sfm_dir, image_list, B, H, W)
+
+
+def run_colmap_with_custom_features(opt: Dict[str, Any], data_dict: Dict[str, Any],
+                                    save_dir: str, keypoints_file: str, matches_file: str):
+    outputs = Path(save_dir) / 'init_sfm'
+    if not os.path.isdir(outputs):
+        os.makedirs(outputs)
+    sfm_pairs = outputs / 'pairs-exhaustive.txt'
+    sfm_dir = outputs / 'sfm_custom_features'
+
+    # 获取图像列表和相机内参
+    rgb_paths = data_dict.rgb_path
+    intrinsics = data_dict.intr[0]
+    image_list = [os.path.basename(path) for path in rgb_paths]
+    images = (data_dict.image.permute(0, 2, 3, 1).detach().cpu().numpy() * 255).astype(np.uint8)
+    B, H, W = images.shape[:3]
+
+    # 加载预先生成的特征点和匹配对
+    keypoints, matches = load_keypoints_and_matches(keypoints_file, matches_file)
+
+    # 创建一个假图像目录并保存图像
+    image_dir = os.path.join(outputs, 'images')
+    if not os.path.isdir(image_dir):
+        os.makedirs(image_dir)
+    for image_id, image_name in enumerate(image_list):
+        imageio.imwrite(os.path.join(image_dir, image_name), images[image_id])
+
+    # 列出所有图像对
+    pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
+
+    # 定义相机并重建
+    camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
+    model = reconstruction_w_known_intrinsics(
+        sfm_dir, Path(image_dir), sfm_pairs, keypoints, matches,
+        camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=False, verbose_features=True,
+        mapper_options=mapper_options
+    )
+
+    # 返回结果
+    if load_colmap_depth:
+        return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
+    return get_poses_and_idx(sfm_dir, image_list, B, H, W)
+
+def load_keypoints_and_matches(keypoints_file: str, matches_file: str):
+    with h5py.File(keypoints_file, 'r') as f:
+        keypoints = {name: f[name][:] for name in f}
+    with h5py.File(matches_file, 'r') as f:
+        matches = {name: f[name][:] for name in f}
+    return keypoints, matches
