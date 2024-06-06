@@ -53,7 +53,7 @@ def get_config():
     settings_model.use_flow = True
     # settings_model.flow_backbone='PDCNet'
     settings_model.flow_backbone='SPSG'
-    settings_model.flow_backbone = 'lightglue'
+    # settings_model.flow_backbone = 'lightglue'
 
     # loss type
     settings_model.loss_type = 'photometric_and_corres_and_depth_cons'

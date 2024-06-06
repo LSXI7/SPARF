@@ -30,7 +30,9 @@ def get_config():
 
     # camera options    
     settings_model.camera = edict()
-    settings_model.camera.initial_pose = 'sfm_pdcnet'
+    # settings_model.camera.initial_pose = 'sfm_pdcnet'
+    # settings_model.camera.initial_pose = 'sfm_custom'
+    settings_model.camera.initial_pose = 'sfm_inloc'
 
     # scheduling of 2 stage training
     settings_model.first_joint_pose_nerf_then_nerf = True
@@ -49,7 +51,9 @@ def get_config():
 
     # flow stuff
     settings_model.use_flow = True
-    settings_model.flow_backbone='PDCNet' 
+    # settings_model.flow_backbone='PDCNet'
+    # settings_model.flow_backbone='SPSG'
+    settings_model.flow_backbone='lightglue'
     settings_model.filter_corr_w_cc = True
     # leads to slightly better results to have additional filtering on the correspondences here
 
