@@ -200,7 +200,7 @@ def get_nerf_default_config_llff():
     cfg.flow_backbone = 'lightglue'
     # cfg.flow_backbone = 'test+lightglue'
     cfg.flow_ckpt_path = None
-    # 下面这个别注释掉了，在调试代码没注释掉
+    # 下面这个别注释掉了，在调试码没注释掉
     cfg.lightglue_feature = 'superpoint'  # "disk"、"aliked"、"sift"、"superpoint"、"doghardnet"
 
     ######################### END
@@ -338,8 +338,8 @@ def get_fixed_colmap_poses_default_config_360_data():
     cfg.camera.optimize_rot = True
     cfg.camera.optimize_relative_poses = False
     cfg.camera.n_first_fixed_poses = 0
-    cfg.camera.initial_pose = 'sfm_pdcnet'
-    # cfg.camera.initial_pose = 'sfm_custom'
+    # cfg.camera.initial_pose = 'sfm_pdcnet'     # pdc 模式
+    cfg.camera.initial_pose = 'sfm_custom'  # 同步匹配方式
 
     # needed for test-time photometric optimization             
     cfg.optim = edict()

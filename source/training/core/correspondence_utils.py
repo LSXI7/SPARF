@@ -39,6 +39,7 @@ class CorrrespondenceUtils:
         returns:
             valid mask (torch.Bool), with shape (H, W, 1)
         """
+        print('min_confidence\n\n\n\n\n\n\n\n\n',min_confidence)
         return get_mask_valid_from_conf_map(p_r, corres_map, min_confidence, max_confidence=max_confidence)
 
     def get_gt_correspondence_maps_all_to_all(self, n_views: int) -> torch.Tensor:
@@ -234,12 +235,14 @@ def get_mask_valid_from_conf_map(p_r: torch.Tensor, corres_map: torch.Tensor,
             p_r = p_r.unsqueeze(-1)
         if p_r.shape[1] == 1:
             p_r = p_r.permute(0, 2, 3, 1)
+        print('uppppppppppppppppppppp')
         h, w = corres_map.shape[1:3]
-        valid_matches = corres_map[:, :, :, 0].ge(0) & corres_map[:, :, :, 0].le(w-1) & corres_map[:, :, :, 1].ge(0) & corres_map[:, :, :, 1].le(h-1)
+        print('h, w', h, w)
+        # valid_matches = corres_map[:, :, :, 0].ge(0) & corres_map[:, :, :, 0].le(w-1) & corres_map[:, :, :, 1].ge(0) & corres_map[:, :, :, 1].le(h-1)
         mask = p_r.ge(min_confidence)
         if max_confidence is not None:
             mask = mask & p_r.le(max_confidence)
-        mask = mask & valid_matches.unsqueeze(-1)  # (B, H, W, 1)
+        # mask = mask & valid_matches.unsqueeze(-1)  # (B, H, W, 1)
         if channel_first:
             mask = mask.permute(0, 3, 1, 2)
     else:
@@ -250,8 +253,9 @@ def get_mask_valid_from_conf_map(p_r: torch.Tensor, corres_map: torch.Tensor,
             channel_first = True
         if p_r.shape[0] == 1:
             p_r = p_r.unsqueeze(1, 2, 0)
-        h, w = corres_map.shape[:2]
-        valid_matches = corres_map[:, :, 0].ge(0) & corres_map[:, :, 0].le(w-1) & corres_map[:, :, 1].ge(0) & corres_map[:, :, 1].le(h-1)
+        print('downnnnnnnnnnnnnnnnnnnnnn')
+        # h, w = corres_map.shape[:2]
+        # valid_matches = corres_map[:, :, 0].ge(0) & corres_map[:, :, 0].le(w-1) & corres_map[:, :, 1].ge(0) & corres_map[:, :, 1].le(h-1)
         mask = p_r.ge(min_confidence)
         if max_confidence is not None:
             mask = mask & p_r.le(max_confidence)

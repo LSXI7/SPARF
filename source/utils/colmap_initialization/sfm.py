@@ -29,6 +29,7 @@ import cv2
 import pycolmap
 from pathlib import Path
 from typing import Callable, Sequence, List, Mapping, MutableMapping, Tuple, Union, Dict, Any, Optional
+import h5py
 
 import source.utils.colmap_initialization.pdcnet_for_hloc as pdcnet_utils
 from source.utils.camera import pose_inverse_4x4
@@ -289,11 +290,15 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
     if not os.path.isdir(outputs):
         os.makedirs(outputs)
     sfm_pairs = outputs / 'pairs-exhaustive.txt'
-    sfm_dir = outputs / 'sfm_superpoint+superglue'
+    sfm_dir = outputs / 'sfm_sift+superglue'
 
-    feature_conf = extract_features.confs['superpoint_max']
+    feature_conf = extract_features.confs['sift']
+    # 特征可选
+    # 'superpoint_aachen'、'superpoint_inloc'、'superpoint_max'、'r2d2'、'd2net-ss'、'sift'、'sosnet'、'disk'
     matcher_conf = match_features.confs['superglue']
-    matcher_conf['model']['weights'] = 'outdoor'
+    # 匹配器可选
+    # 'superglue'、'superglue-fast'、'NN-superpoint'、'NN-ratio'、'NN-mutual'、'adalam'
+    matcher_conf['model']['weights'] = 'indoor'
 
     # get image list 
     rgb_paths = data_dict.rgb_path
@@ -327,7 +332,7 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
              camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=False,
              verbose_features=True,
              mapper_options=mapper_options)
-
+    print('\n\n\n\nload_colmap_depth:', load_colmap_depth)
     if load_colmap_depth:
         return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
     return get_poses_and_idx(sfm_dir, image_list, B, H, W)
@@ -335,6 +340,7 @@ def compute_sfm_inloc(opt: Dict[str, Any], data_dict: Dict[str, Any],
 
 def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
                        save_dir: str, load_colmap_depth: bool = False):
+    print('\n\n\n\n运行了sfm_pdcnet\n\n\n\n\n')
     """Run COLMAP with PDC-Net. """
     # set-up the paths
     outputs = Path(save_dir) / 'init_sfm'
@@ -347,10 +353,14 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
 
     # cfg
     cfg = edict(pdcnet_utils.default_pdcnet_cfg)
-    cfg['path_to_pre_trained_models'] = os.path.dirname(opt.flow_ckpt_path)
+    print('flow_ckpt_path:', opt.flow_ckpt_path)
+    if opt.flow_ckpt_path == None:
+        cfg['path_to_pre_trained_models'] = '/data/xyjiang/NeRF/sparf/pre_trained_model/PDCNet_megadepth.pth.tar'
+    else:
+        cfg['path_to_pre_trained_models'] = os.path.dirname(opt.flow_ckpt_path)
     # '/home/jupyter/shared/pre_trained_models'
 
-    # get image list 
+    # get image list
     rgb_paths = data_dict.rgb_path
     intrinsics = data_dict.intr[0]  # (3, 3)
     image_list = [os.path.basename(path) for path in rgb_paths]
@@ -358,6 +368,8 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
     B, H, W = images.shape[:3]
 
     overwrite = False
+    if os.path.exists(str(sfm_dir / 'images.bin')) or overwrite:
+        print('下面的没运行')
     if not os.path.exists(str(sfm_dir / 'images.bin')) or overwrite:
         # create a fake image dir and save the images there
         image_dir = os.path.join(outputs, 'images')
@@ -370,7 +382,7 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
         rgb_paths = data_dict.rgb_path
         images_name = [os.path.basename(path) for path in rgb_paths]
 
-        # list of all iamge pairs 
+        # list of all iamge pairs
         pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
         # saved in path at sfm_pairs
         pairs = parse_retrieval(sfm_pairs)
@@ -382,7 +394,7 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
         feature_path = pdcnet_utils.extract_keypoints_and_save_h5(
             keypoint_extractor_module=keypoint_extractor_module, images_dir=image_dir, image_names=image_list,
             export_dir=save_dir, name=name_file, cfg=cfg, overwrite=cfg.overwrite)
-
+        print('\n\n\n\n\n运行到sfm——385这了\n\n\n\n\n')
         match_path = Path(os.path.join(save_dir, name_file + '.h5'))
         if not os.path.exists(str(match_path)) or cfg.overwrite:
             matches_dict = pdcnet_utils.retrieve_matches_at_keypoints_locations_from_pair_list(
@@ -396,6 +408,105 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
         # 3D reconstruction
         # Run COLMAP on the features and matches.
         camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
+
+        model = reconstruction_w_known_intrinsics \
+            (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path,
+             camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=True,
+             mapper_options=mapper_options)
+
+    if load_colmap_depth:
+        print('运行load_colmap_depth')
+        return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
+    print('没有运行load_colmap_depth')
+    return get_poses_and_idx(sfm_dir, image_list, B, H, W)
+
+
+def convert_keypoints_shape(feature_path):
+    # 打开HDF5文件进行读取和写入
+    with h5py.File(feature_path, 'r+') as f:
+        for key in f.keys():
+            group = f[key]
+            if 'keypoints' in group:
+                keypoints = group['keypoints'][...]
+                print(f"Original keypoints shape for {key}: {keypoints.shape}")
+                if keypoints.shape[0] == 1:
+                    # 转换形状从 (1, n, 2) 到 (n, 2)
+                    keypoints = keypoints.squeeze(0)
+                    print(f"Converted keypoints shape for {key}: {keypoints.shape}")
+                    # 删除旧的数据集
+                    del group['keypoints']
+                    # 创建新的数据集并保存转换后的keypoints
+                    group.create_dataset('keypoints', data=keypoints)
+    print('Finished converting keypoints shapes.')
+    return feature_path
+
+
+def run_colmap_with_custom_features(opt: Dict[str, Any], data_dict: Dict[str, Any],
+                                    save_dir: str, load_colmap_depth: bool = False):
+    # set-up the paths
+    outputs = Path(save_dir) / 'init_sfm'
+    if not os.path.isdir(outputs):
+        os.makedirs(outputs)
+    sfm_pairs = outputs / 'pairs-exhaustive.txt'
+    sfm_dir = outputs / 'sfm_net'
+    save_dir = str(sfm_dir)
+    name_file = 'net_megadepth'
+
+    from source.models.flow_net import flow_net_model_select
+    flow_net = flow_net_model_select(opt.flow_backbone)
+    print(f'\n\n\n\n接下来使用{opt.flow_backbone}进行匹配:\n\n\n')
+
+    # get image list
+    rgb_paths = data_dict.rgb_path
+    intrinsics = data_dict.intr[0]  # (3, 3)
+    image_list = [os.path.basename(path) for path in rgb_paths]
+    images = (data_dict.image.permute(0, 2, 3, 1).detach().cpu().numpy() * 255).astype(np.uint8)
+    B, H, W = images.shape[:3]
+
+    overwrite = True
+    if not os.path.exists(str(sfm_dir / 'images.bin')) or overwrite:
+        # create a fake image dir and save the images there
+        image_dir = os.path.join(outputs, 'images')
+        if not os.path.isdir(image_dir):
+            os.makedirs(image_dir)
+        for image_id, image_name in enumerate(image_list):
+            imageio.imwrite(os.path.join(image_dir, image_name), images[image_id])
+
+        # get name of the images
+        rgb_paths = data_dict.rgb_path
+        images_name = [os.path.basename(path) for path in rgb_paths]
+
+        # list of all iamge pairs
+        pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
+        # saved in path at sfm_pairs
+        pairs = parse_retrieval(sfm_pairs)
+        pairs = [(q, r) for q, rs in pairs.items() for r in rs]
+
+        # Extract and match local features
+        # extract keypoints from all images at original resolution
+        keypoint_extractor_module = flow_net
+        print('image_dir:', image_dir)
+        print('image_list:', image_list)
+        feature_path = keypoint_extractor_module.extract_keypoints_and_save_h5(
+            keypoint_extractor_module=keypoint_extractor_module, images_dir=image_dir, image_names=image_list,
+            export_dir=save_dir, name=name_file, overwrite=overwrite)
+
+        match_path = Path(os.path.join(save_dir, name_file + '.h5'))
+        if not os.path.exists(str(match_path)) or overwrite:
+            matches_dict = keypoint_extractor_module.retrieve_matches_at_keypoints_locations_from_pair_list(
+                pair_names=pairs, images_dir=image_dir,
+                path_to_h5_keypoints=os.path.join(save_dir, name_file + '_keypoints.h5'), key_for_keypoints='keypoints',
+                name_to_pair_function='names_to_pair')
+
+            match_path = keypoint_extractor_module.save_matches_to_h5(matches_dict, pairs, export_dir=save_dir,
+                                                                      match_name=name_file,
+                                                                      overwrite=overwrite)
+
+        # 3D reconstruction
+        # Run COLMAP on the features and matches.
+        print('运行到sfm/496')
+        feature_path = convert_keypoints_shape(feature_path)
+        camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
         model = reconstruction_w_known_intrinsics \
             (sfm_dir, Path(image_dir), sfm_pairs, feature_path, match_path,
              camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=True,
@@ -404,52 +515,3 @@ def compute_sfm_pdcnet(opt: Dict[str, Any], data_dict: Dict[str, Any],
     if load_colmap_depth:
         return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
     return get_poses_and_idx(sfm_dir, image_list, B, H, W)
-
-
-def run_colmap_with_custom_features(opt: Dict[str, Any], data_dict: Dict[str, Any],
-                                    save_dir: str, keypoints_file: str, matches_file: str):
-    outputs = Path(save_dir) / 'init_sfm'
-    if not os.path.isdir(outputs):
-        os.makedirs(outputs)
-    sfm_pairs = outputs / 'pairs-exhaustive.txt'
-    sfm_dir = outputs / 'sfm_custom_features'
-
-    # 获取图像列表和相机内参
-    rgb_paths = data_dict.rgb_path
-    intrinsics = data_dict.intr[0]
-    image_list = [os.path.basename(path) for path in rgb_paths]
-    images = (data_dict.image.permute(0, 2, 3, 1).detach().cpu().numpy() * 255).astype(np.uint8)
-    B, H, W = images.shape[:3]
-
-    # 加载预先生成的特征点和匹配对
-    keypoints, matches = load_keypoints_and_matches(keypoints_file, matches_file)
-
-    # 创建一个假图像目录并保存图像
-    image_dir = os.path.join(outputs, 'images')
-    if not os.path.isdir(image_dir):
-        os.makedirs(image_dir)
-    for image_id, image_name in enumerate(image_list):
-        imageio.imwrite(os.path.join(image_dir, image_name), images[image_id])
-
-    # 列出所有图像对
-    pairs_from_exhaustive.main(output=sfm_pairs, image_list=image_list)
-
-    # 定义相机并重建
-    camera_known_intrinsics = define_pycolmap_camera(intrinsics, height=H, width=W)
-    model = reconstruction_w_known_intrinsics(
-        sfm_dir, Path(image_dir), sfm_pairs, keypoints, matches,
-        camera_mode='SINGLE', cam=camera_known_intrinsics, image_list=image_list, verbose=False, verbose_features=True,
-        mapper_options=mapper_options
-    )
-
-    # 返回结果
-    if load_colmap_depth:
-        return get_poses_and_depths_and_idx(sfm_dir, image_list, B, H, W)
-    return get_poses_and_idx(sfm_dir, image_list, B, H, W)
-
-def load_keypoints_and_matches(keypoints_file: str, matches_file: str):
-    with h5py.File(keypoints_file, 'r') as f:
-        keypoints = {name: f[name][:] for name in f}
-    with h5py.File(matches_file, 'r') as f:
-        matches = {name: f[name][:] for name in f}
-    return keypoints, matches

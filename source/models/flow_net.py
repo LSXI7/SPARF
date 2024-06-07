@@ -54,10 +54,12 @@ class FlowSelectionWrapper(nn.Module):
         if '+' in backbone:
             parts = backbone.split('+')
             self.test = parts[0]
+            print("\n\n\n\n\n\n\n\n\n\n\n进入test模式\n\n\n\n\n\n\n\n\n")
             self.backbone = parts[1]
         else:
             self.test = None
             self.backbone = backbone
+        print('backbone: ', self.backbone)
         self.confidence_map_type = 'p_r'
         self.load_flow_network(backbone=self.backbone, ckpt_path=ckpt_path)
 
@@ -91,6 +93,7 @@ class FlowSelectionWrapper(nn.Module):
         """
         Loads a network checkpoint file.
         """
+        print(f'\n\n\n\n\n使用{backbone}加载网络\n\n\n\n\n')
         print('111199999999999999999999999999999999999999999')
         if not os.path.isfile(checkpoint_path):
             raise ValueError('The checkpoint that you chose does not exist, {}'
@@ -129,10 +132,10 @@ class FlowSelectionWrapper(nn.Module):
                 flow_plot (torch.Tensor): image plot
         '''
         if self.backbone == 'SPSG':
-            return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot)
-        elif self.backbone == 'PDCNet':
             if self.test == 'test':
                 return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
+            return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot)
+        elif self.backbone == 'PDCNet':
             return self.compute_matches_pdcnet(images, combi_list_tar_src, plot, use_homography)
         elif self.backbone == 'lightglue':
             if self.test == 'test':
@@ -154,10 +157,10 @@ class FlowSelectionWrapper(nn.Module):
                 flow_plot (torch.Tensor): image plot
         '''
         if self.backbone == 'SPSG':
-            return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot, return_dummy_cc_map=True)
-        elif self.backbone == 'PDCNet':
             if self.test == 'test':
                 return self.compute_matches_test(images, combi_list_tar_src, plot=plot)
+            return self.compute_matches_spsg(images, combi_list_tar_src, plot=plot, return_dummy_cc_map=True)
+        elif self.backbone == 'PDCNet':
             return self.compute_matches_pdcnet_with_cc(images, combi_list_tar_src, plot, use_homography)
         elif self.backbone == 'lightglue':
             if self.test == 'test':
@@ -179,18 +182,30 @@ class FlowSelectionWrapper(nn.Module):
                                          shape [len(combi_list), 2/1, H, W]
                 flow_plot (torch.Tensor): image plot
         '''
-        print('进入测试程序')
         plot_ = plot and combi_list_tar_src.shape[1] < 100
         # print('combi_list_tar_src.shape: ', combi_list_tar_src.shape)
         print(combi_list_tar_src)
         B, _, H, W = images.shape
+        device = images.device
+        print('device: ', device)
 
+        # ##########################如果需要原图匹配就用这个
+        # from data_loader_origin_size import ImageLoader
+        # scene='scan8'
+        # print(f"Processing scene: ", scene)
+        # ImageLoader= ImageLoader()
+        # images = ImageLoader.load_images(scan=scene).to(device)
+        #
+
+        print('images: ', images.shape)
+        # print('\n\n\n\n\n\n',images)
+        # print('\n\n\n\n\n\n\n',images.shape)
         images_proc = self.flow_net.pre_process_img(images * 255)
+        print('images_proc: ', images_proc.shape)
         batch_size = 50
 
         # extract keypoints for all images
         kp_dict = {}
-        output_kp_h5 = self.flow_net.create_output_directory(base_dir='h5_save')
         # kp_dict will contain 'keypoint', 'scores'
         # in each, there is a list of lists, i.e. an element per image
         for idx_start in range(0, images.shape[0], batch_size):
@@ -241,13 +256,18 @@ class FlowSelectionWrapper(nn.Module):
             diff = torch.round(pred_kp_target) - pred_kp_target
             pred_kp_target = torch.round(pred_kp_target).long().to(images.device)
             pred_kp_source = torch.from_numpy(pred['kp_source']).to(images.device) + diff  # Nx2
-            print('pred_kp_target: ', pred_kp_target)
-            print('pred_kp_source: ', pred_kp_source)
+            print('pred_kp_target: ', pred_kp_target.shape)
+            print('pred_kp_source: ', pred_kp_source.shape)
             # 可视化匹配，输出路径为output_base_dir
             output_path = os.path.join(output_base_dir, f'matches_{id_source}_{id_target}.png')
-            self.flow_net.plot_matches(images_proc[id_source], images_proc[id_target], pred_kp_source,
-                                       pred_kp_target,
+            self.flow_net.plot_matches(images_proc[id_source], images_proc[id_target], pred_kp_source, pred_kp_target,
                                        output_path)
+
+            # 缩放到300x400大小
+            pred_kp_target = pred_kp_target.float()
+            pred_kp_target[:, 0] *= 0.25
+            pred_kp_target[:, 1] *= 0.25
+            pred_kp_target = pred_kp_target.long()
 
             if plot_:
                 plot_list.append(make_matching_plot_fast(
@@ -265,14 +285,53 @@ class FlowSelectionWrapper(nn.Module):
             assert pred_kp_source.dim() == 2, "pred_kp_source should be Nx2."
 
             print("pred_kp_target.shape: ", pred_kp_target.shape)
-            max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
-            max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
-            print("max_x_value: ", max_x_value)
-            print("max_y_value: ", max_y_value)
+            # max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
+            # max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
+            # print("max_x_value: ", max_x_value)
+            # print("max_y_value: ", max_y_value)
 
             correspondence_map[
                 idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_kp_source
             conf_map[idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_conf.reshape(-1, 1)
+
+            bins = np.linspace(0, 1, 11)  # 0到1分成10个区间
+            # 使用np.histogram计算每个区间的数量
+            conf_map_flat = pred_conf.view(-1)
+            hist = torch.histc(conf_map_flat, bins=10, min=0.00001, max=1)
+            print("区间:", bins)
+            print("每个区间的数量:", hist)
+
+        #####################稀疏性计算#####################
+        # 计算0元素的数量
+        zero_elements = torch.eq(conf_map, 0).sum()
+        # 计算总元素数量
+        total_elements = conf_map.numel()
+        # 计算0元素的占比
+        zero_percentage = zero_elements / total_elements * 100
+        # 打印结果
+        print(f"Number of zero elements: {zero_elements.item()}")
+        print(f"Percentage of zero elements: {zero_percentage:.2f}%")
+
+        ## 找到最后一个维度的平面坐标是否为零的布尔掩码
+        # zero_mask = torch.eq(correspondence_map, 0)
+        ## 检查两个平面坐标是否同时为零（即最后一个维度的两个值都为零）
+        # both_zero_mask = torch.all(zero_mask, dim=-1)
+        ## 获取这些非零元素的位置
+        # non_zero_positions = torch.nonzero(~both_zero_mask)
+        # print('non_zero_positions: ', non_zero_positions.shape)
+        # print("非零元素的位置：", non_zero_positions)
+
+        ret = [correspondence_map.permute(0, 3, 1, 2), conf_map.permute(0, 3, 1, 2)]
+        if return_dummy_cc_map:
+            ret += [torch.ones_like(conf_map.permute(0, 3, 1, 2))]
+
+        if plot:
+            if plot_list is not None:
+                plot_list = np.concatenate(plot_list, axis=0)
+                plot_list = torch.from_numpy(plot_list.astype(np.float32)).permute(2, 0, 1)
+            ret += [plot_list]
+        # print('\n\n\n\n\n\n\n\n', ret)
+        return ret
 
     # ---------------------------- SPSG matches --------------------------------
     def compute_matches_spsg(self, images, combi_list_tar_src, plot=False, return_dummy_cc_map=False):
@@ -348,8 +407,8 @@ class FlowSelectionWrapper(nn.Module):
             diff = torch.round(pred_kp_target) - pred_kp_target
             pred_kp_target = torch.round(pred_kp_target).long().to(images.device)
             pred_kp_source = torch.from_numpy(pred['kp_source']).to(images.device) + diff  # Nx2
-            print('pred_kp_target: ', pred_kp_target)
-            print('pred_kp_source: ', pred_kp_source)
+            # print('pred_kp_target: ', pred_kp_target)
+            # print('pred_kp_source: ', pred_kp_source)
             # 可视化匹配，输出路径为output_base_dir
             output_path = os.path.join(output_base_dir, f'matches_{id_source}_{id_target}.png')
             self.flow_net.plot_matches(images_proc[id_source], images_proc[id_target], pred_kp_source, pred_kp_target,
@@ -371,14 +430,23 @@ class FlowSelectionWrapper(nn.Module):
             assert pred_kp_source.dim() == 2, "pred_kp_source should be Nx2."
 
             print("pred_kp_target.shape: ", pred_kp_target.shape)
-            max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
-            max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
-            print("max_x_value: ", max_x_value)
-            print("max_y_value: ", max_y_value)
+
+            # 输出最大边界，这个对无匹配的图像对会报错
+            # max_x_value, _ = torch.max(pred_kp_target[:, 0], dim=0)
+            # max_y_value, _ = torch.max(pred_kp_target[:, 1], dim=0)
+            # print("max_x_value: ", max_x_value)
+            # print("max_y_value: ", max_y_value)
 
             correspondence_map[
                 idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_kp_source
             conf_map[idx, pred_kp_target[:, 1], pred_kp_target[:, 0]] = pred_conf.reshape(-1, 1)
+
+            bins = np.linspace(0, 1, 11)  # 0到1分成10个区间
+            # 使用np.histogram计算每个区间的数量
+            conf_map_flat = pred_conf.view(-1)
+            hist = torch.histc(conf_map_flat, bins=10, min=0.00001, max=1)
+            print("区间:", bins)
+            print("每个区间的数量:", hist)
 
         #####################稀疏性计算#####################
         # 计算0元素的数量
@@ -391,14 +459,14 @@ class FlowSelectionWrapper(nn.Module):
         print(f"Number of zero elements: {zero_elements.item()}")
         print(f"Percentage of zero elements: {zero_percentage:.2f}%")
 
-        # 找到最后一个维度的平面坐标是否为零的布尔掩码
-        zero_mask = torch.eq(correspondence_map, 0)
-        # 检查两个平面坐标是否同时为零（即最后一个维度的两个值都为零）
-        both_zero_mask = torch.all(zero_mask, dim=-1)
-        # 获取这些非零元素的位置
-        non_zero_positions = torch.nonzero(~both_zero_mask)
-        print('non_zero_positions: ', non_zero_positions.shape)
-        print("非零元素的位置：", non_zero_positions)
+        # # 找到最后一个维度的平面坐标是否为零的布尔掩码
+        # zero_mask = torch.eq(correspondence_map, 0)
+        # # 检查两个平面坐标是否同时为零（即最后一个维度的两个值都为零）
+        # both_zero_mask = torch.all(zero_mask, dim=-1)
+        # # 获取这些非零元素的位置
+        # non_zero_positions = torch.nonzero(~both_zero_mask)
+        # print('non_zero_positions: ', non_zero_positions.shape)
+        # print("非零元素的位置：", non_zero_positions)
 
         ret = [correspondence_map.permute(0, 3, 1, 2), conf_map.permute(0, 3, 1, 2)]
         if return_dummy_cc_map:
@@ -923,6 +991,7 @@ def get_combi_list(num_views, method='all') -> torch.tensor:
 
 
 def flow_net_model_select(backbone, train_features=False):
+    print(f'\n\n\n\n\n\n使用{backbone}加载\n\n\n')
     if backbone == 'PDCNet':
         global_optim_iter = 3
         local_optim_iter = 3

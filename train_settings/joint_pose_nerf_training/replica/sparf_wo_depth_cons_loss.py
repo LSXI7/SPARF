@@ -31,8 +31,8 @@ def get_config():
     # camera options    
     settings_model.camera = edict()
     # settings_model.camera.initial_pose = 'sfm_pdcnet'
-    # settings_model.camera.initial_pose = 'sfm_custom'
-    settings_model.camera.initial_pose = 'sfm_inloc'
+    settings_model.camera.initial_pose = 'sfm_custom'
+    # settings_model.camera.initial_pose = 'sfm_inloc'
 
     # scheduling of 2 stage training
     settings_model.first_joint_pose_nerf_then_nerf = True

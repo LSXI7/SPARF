@@ -196,6 +196,7 @@ def extract_keypoints_and_save_h5(keypoint_extractor_module: Callable[[Any], Any
     print('Compute keypoints over a grid')
     pbar = tqdm(enumerate(image_names), total=len(image_names))
     for i, image_name in pbar:
+        print('\n\n\n\nimage_name: ', image_name)
         image = imageio.imread(os.path.join(images_dir, image_name))
         kp = keypoint_extractor_module.get_keypoints(image, cfg=cfg)
         grp = feature_file.create_group(image_name)

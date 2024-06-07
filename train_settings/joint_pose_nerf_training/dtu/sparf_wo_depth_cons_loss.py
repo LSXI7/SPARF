@@ -49,8 +49,8 @@ def get_config():
     # flow stuff
     settings_model.use_flow = True
     # settings_model.flow_backbone='PDCNet'
-    settings_model.flow_backbone = 'SPSG'
-    # settings_model.flow_backbone = 'test+SPSG'
+    # settings_model.flow_backbone = 'SPSG'
+    settings_model.flow_backbone = 'test+SPSG'
     # settings_model.flow_backbone = 'lightglue'
     # settings_model.flow_backbone = 'test+lightglue'
 

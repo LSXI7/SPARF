@@ -34,7 +34,8 @@ import source.utils.vis_rendering as util_vis
 from source.utils.geometry.align_trajectories import \
     (align_ate_c2b_use_a2b, align_translations, backtrack_from_aligning_and_scaling_to_first_cam,
      backtrack_from_aligning_the_trajectory)
-from source.utils.colmap_initialization.sfm import compute_sfm_pdcnet
+from source.utils.colmap_initialization.sfm import compute_sfm_pdcnet, run_colmap_with_custom_features, \
+    compute_sfm_inloc
 
 
 class CommonPoseEvaluation:
@@ -47,7 +48,7 @@ class CommonPoseEvaluation:
         n_poses = len(self.train_data)
         valid_poses_idx = np.arange(start=0, stop=n_poses, step=1).tolist()
         index_images_excluded = []
-
+        print('录入的opt.camera.initial_pose为', opt.camera.initial_pose)
         if opt.camera.optimize_relative_poses:
             if opt.camera.initial_pose == 'noisy_gt':
                 # fix the x first one to the GT poses and the ones to optimize to the GT ones 
@@ -83,7 +84,8 @@ class CommonPoseEvaluation:
             elif 'sfm' in opt.camera.initial_pose:
                 # initial poses obtained by COLMAP with different matchers
                 # we all save it into a common directory, to make sure that if it was done before, it is not done again
-
+                print('确定了sfm在这里\n\n\n\n\n')
+                print('opt.camera.initial_pose', opt.camera.initial_pose)
                 directory_save = os.path.join(self._base_save_dir, 'colmap_initial_results', self.settings.dataset)
                 if self.settings.train_sub is not None and self.settings.train_sub != 0:
                     directory_save = os.path.join(directory_save, 'subset_{}'.format(self.settings.train_sub))
@@ -92,22 +94,26 @@ class CommonPoseEvaluation:
                 directory = directory_save
                 os.makedirs(directory_save, exist_ok=True)
 
+                print('\n\n\n\nself.settings.load_colmap_depth\n\n\n', self.settings.load_colmap_depth)
                 if self.settings.load_colmap_depth:
                     if 'pdcnet' in opt.camera.initial_pose:
+                        print('\n\n\n\n\n\n\n\n正在由pdc得到colmapn\n\n\n\n\n\n\n\n\n')
                         initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
                             colmap_conf_map = compute_sfm_pdcnet(opt=self.settings, data_dict=self.train_data.all,
                                                                  save_dir=directory,
                                                                  load_colmap_depth=True)
                     elif 'custom' in opt.camera.initial_pose:
-                        keypoints_file = opt.camera.keypoints_file
-                        matches_file = opt.camera.matches_file
+                        print('\n\n\n\n\n\n\n\n正在由H5得到colmapn\n\n\n\n\n\n\n\n\n')
                         initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
                             colmap_conf_map = run_colmap_with_custom_features(opt=self.settings,
                                                                               data_dict=self.train_data.all,
                                                                               save_dir=directory,
-                                                                              keypoints_file=keypoints_file,
-                                                                              matches_file=matches_file,
                                                                               load_colmap_depth=True)
+                    elif 'inloc' in opt.camera.initial_pose:
+                        print('\n\n\n\n\n\n\n\n正在由inloc得到colmapn\n\n\n\n\n\n\n\n\n')
+                        initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
+                            colmap_conf_map = compute_sfm_inloc(opt=self.settings, data_dict=self.train_data.all,
+                                                                save_dir=directory, load_colmap_depth=True)
                     else:
                         raise ValueError
 
@@ -121,19 +127,23 @@ class CommonPoseEvaluation:
                     self.train_data.all.colmap_depth = colmap_depth_map.to(self.device) * trans_scaling
                     self.train_data.all.colmap_conf = colmap_conf_map.to(self.device)
                 else:
+                    print('进行到了这里\n\n\n\n\n')
+                    print('opt.camera.initial_pose', opt.camera.initial_pose)
                     if 'pdcnet' in opt.camera.initial_pose:
+                        print('\n\n\n\n\n\n\n\n正在由pdc得到colmap\n\n\n\n\n\n\n\n\n')
                         initial_poses_w2c, valid_poses_idx, index_images_excluded = \
                             compute_sfm_pdcnet(opt=self.settings, data_dict=self.train_data.all, save_dir=directory)
                     elif 'custom' in opt.camera.initial_pose:
-                        keypoints_file = opt.camera.keypoints_file
-                        matches_file = opt.camera.matches_file
-                        initial_poses_w2c, valid_poses_idx, index_images_excluded, colmap_depth_map, \
-                            colmap_conf_map = run_colmap_with_custom_features(opt=self.settings,
-                                                                              data_dict=self.train_data.all,
-                                                                              save_dir=directory,
-                                                                              keypoints_file=keypoints_file,
-                                                                              matches_file=matches_file,
-                                                                              load_colmap_depth=True)
+                        print('\n\n\n\n\n\n\n\n正在由H5得到colmap\n\n\n\n\n\n\n\n\n')
+                        initial_poses_w2c, valid_poses_idx, index_images_excluded = run_colmap_with_custom_features(
+                            opt=self.settings,
+                            data_dict=self.train_data.all,
+                            save_dir=directory)
+                    elif 'inloc' in opt.camera.initial_pose:
+                        print('\n\n\n\n\n\n\n\n正在由inloc得到colmap\n\n\n\n\n\n\n\n\n')
+                        initial_poses_w2c, valid_poses_idx, index_images_excluded = compute_sfm_inloc(opt=self.settings,
+                                                                                                      data_dict=self.train_data.all,
+                                                                                                      save_dir=directory)
                     else:
                         raise ValueError
 

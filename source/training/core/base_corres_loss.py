@@ -35,7 +35,7 @@ class CorrespondenceBasedLoss(BaseLoss, CorrrespondenceUtils):
                             
                              'pairing_angle_threshold': 30, # degree, in case 'angle' pair selection chosen
                              'filter_corr_w_cc': False, 
-                             'min_conf_valid_corr': 0.95, 
+                             'min_conf_valid_corr': 0.95,
                              'min_conf_cc_valid_corr': 1./(1. + 1.5), 
                              })
         self.opt = override_options(default_cfg, opt)
@@ -108,11 +108,11 @@ class CorrespondenceBasedLoss(BaseLoss, CorrrespondenceUtils):
         else:
             corres_maps, conf_maps, flow_plot = self.flow_net.compute_flow_and_confidence_map_of_combi_list\
                 (images, combi_list_tar_src=combi_list, plot=True, 
-                use_homography=self.opt.use_homography_flow) 
-        mask_valid_corr = get_mask_valid_from_conf_map(p_r=conf_maps.reshape(-1, 1, H, W), 
+                use_homography=self.opt.use_homography_flow)
+        mask_valid_corr = get_mask_valid_from_conf_map(p_r=conf_maps.reshape(-1, 1, H, W),
                                                        corres_map=corres_maps.reshape(-1, 2, H, W), 
                                                        min_confidence=self.opt.min_conf_valid_corr)  # (n_views*(n_views-1), 1, H, W)
-
+        print('\n\n\n\n\n\n\n\n\n\n\n',mask_valid_corr.shape)
         if self.opt.filter_corr_w_cc:
             mask_valid_corr = mask_valid_corr & conf_maps_from_cc.ge(self.opt.min_conf_cc_valid_corr)
         
@@ -141,8 +141,9 @@ class CorrespondenceBasedLoss(BaseLoss, CorrrespondenceUtils):
         filtered_flow_pairs = []
         for i in range(len(flow_pairs)):
             nbr_confident_regions = self.mask_valid_corr[i].sum()
+            print('nbr_confident_regions', nbr_confident_regions, self.opt.min_nbr_matches)
             if nbr_confident_regions > self.opt.min_nbr_matches:
-                print('yessssssssssssssssssssssssssssssssssssssss')
+                print(f'yessssssssssssssssssssssssssssssssssssssss{i}')
                 filtered_flow_pairs.append((i, flow_pairs[i][0], flow_pairs[i][1]))
                 # corresponds to index_of_flow, index_of_target_image, index_of_source_image
         self.filtered_flow_pairs = filtered_flow_pairs
